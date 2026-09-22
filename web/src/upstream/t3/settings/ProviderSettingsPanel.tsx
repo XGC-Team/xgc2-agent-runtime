@@ -18,8 +18,7 @@ export function ProviderSettingsPanel({ providers, selectedId, onSelect, childre
         className={cn('flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors duration-150', selected ? 'bg-muted/45' : 'hover:bg-muted/25')}>
         <Icon className={cn('size-4 shrink-0', selected ? 'text-foreground' : 'text-muted-foreground')} aria-hidden="true" />
         <span className="min-w-0 flex-1">
-          <span className="flex items-baseline gap-2"><span className={cn('text-[13px]', selected ? 'font-medium text-foreground' : 'text-foreground/80')}>{providerLabels[provider.provider]}</span>
-            {provider.version ? <code className="text-[11px] text-muted-foreground">{provider.version}</code> : null}</span>
+          <span className="block truncate text-[13px]"><span className={cn(selected ? 'font-medium text-foreground' : 'text-foreground/80')}>{providerLabels[provider.provider]}</span></span>
           <span className="mt-0.5 block text-[11px] text-muted-foreground">{!provider.enabled ? (locale === 'zh' ? '已停用' : 'Disabled') : provider.available ? (locale === 'zh' ? '可用' : 'Available') : provider.detail || (locale === 'zh' ? '不可用' : 'Unavailable')}</span>
         </span>
       </button>; })}

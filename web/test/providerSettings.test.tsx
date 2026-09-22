@@ -57,7 +57,7 @@ describe('shared provider settings', () => {
   })
   it('preserves edits while switching providers and only probes the explicit selection', async () => {
     const refresh = vi.fn().mockResolvedValue(undefined)
-    render(<AgentProviderSettings settings={doc()} onSave={vi.fn()} onRefresh={refresh} />)
+    const view = render(<AgentProviderSettings settings={doc()} onSave={vi.fn()} onRefresh={refresh} />)
     fireEvent.change(screen.getByLabelText('CLI path'), { target: { value: '/draft' } })
     fireEvent.click(role('agent-provider-select', 'other'))
     expect((screen.getByLabelText('CLI path') as HTMLInputElement).value).toBe('')
@@ -65,6 +65,12 @@ describe('shared provider settings', () => {
     await waitFor(() => expect(refresh).toHaveBeenCalledWith('other'))
     fireEvent.click(role('agent-provider-select', 'codex'))
     expect((screen.getByLabelText('CLI path') as HTMLInputElement).value).toBe('/draft')
+    expect(role('agent-provider-select', 'codex').textContent).not.toContain('1.2.3')
+    expect(role('agent-provider-version', 'codex').textContent).toBe('1.2.3')
+    view.rerender(<AgentProviderSettings settings={{ revision: 'r1', providers: [provider(), provider('other', { available: false, version: '9.9.9' })] }} onSave={vi.fn()} onRefresh={refresh} />)
+    fireEvent.click(role('agent-provider-select', 'other'))
+    expect(role('agent-provider-select', 'other').textContent).not.toContain('9.9.9')
+    expect(role('agent-provider-version', 'other')).toBeNull()
   })
   it('serializes save callbacks, shows fixed action labels, and honors inactive surfaces', async () => {
     let complete!: () => void

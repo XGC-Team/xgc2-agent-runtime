@@ -72,6 +72,7 @@ export function AgentProviderSettings({ settings, onSave, onRefresh, disabled = 
         {provider ? <section key={provider.id} data-xgc-role="agent-provider-editor" data-xgc-id={provider.id}>
           <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0"><h3 className="text-[15px] font-medium tracking-[-0.005em]">{providerLabels[provider.provider]}</h3>
+              {provider.available && provider.version ? <p className="mt-1 text-xs text-muted-foreground" data-xgc-role="agent-provider-version" data-xgc-id={provider.id}>{provider.version}</p> : null}
               <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground" data-xgc-role="agent-provider-login-status" data-xgc-id={provider.id}>
                 <span aria-hidden className={provider.login.status === 'authenticated' ? 'inline-block h-1.5 w-1.5 rounded-full bg-current' : 'inline-block h-1.5 w-1.5 rounded-full border border-current opacity-50'} />
                 {provider.login.status === 'authenticated' ? (zh ? '已登录' : 'Signed in') : provider.login.status === 'unauthenticated' ? (zh ? '未登录' : 'Not signed in') : (zh ? '登录状态未知' : 'Login status unknown')}{provider.login.detail ? ` · ${provider.login.detail}` : ''}

@@ -1,0 +1,525 @@
+{
+  "repository": "https://github.com/pingdotgg/t3code",
+  "revision": "bf3be75c400cf605dc0c80de9458458854c84131",
+  "license": "MIT",
+  "copyright": "Copyright (c) 2026 T3 Tools Inc.",
+  "licensePath": "LICENSE.T3Code",
+  "scope": "Pinned, adapted T3 Code web chat presentation slice with XGC-owned native-protocol and host integration; not the full T3 Code frontend, IDE or server.",
+  "sourceFiles": [
+    {
+      "localPath": "src/upstream/t3/ComposerSurface.tsx",
+      "upstreamPath": "apps/web/src/components/chat/ComposerSurface.tsx",
+      "upstreamSha256": "1ae26e77608f22fda0fbcc4a074215af54ee13459f73929ab4aacfda75e20773",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/chat/ComposerSurface.tsx",
+      "migration": "component",
+      "changes": "Preserve upstream component implementation, slots and utility classes; local ESM imports and attribution header."
+    },
+    {
+      "localPath": "src/upstream/t3/ComposerBanner.tsx",
+      "upstreamPath": "apps/web/src/components/chat/ComposerBanner.tsx",
+      "upstreamSha256": "395d28a887a2e06dc634ab28c39bedd60f533096695eafc2a8e3700d1e58099a",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/chat/ComposerBanner.tsx",
+      "migration": "component",
+      "changes": "Preserve upstream component implementation, slots and utility classes; local ESM imports and attribution header."
+    },
+    {
+      "localPath": "src/upstream/t3/ui/button.tsx",
+      "upstreamPath": "apps/web/src/components/ui/button.tsx",
+      "upstreamSha256": "fd98381cf5e65df085cfbf80db759e05b3155bdd68d5fdf088467836ca12dc24",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/ui/button.tsx",
+      "migration": "component",
+      "changes": "Preserve upstream Base UI component presentation; local ESM imports and attribution header."
+    },
+    {
+      "localPath": "src/upstream/t3/ui/collapsible.tsx",
+      "upstreamPath": "apps/web/src/components/ui/collapsible.tsx",
+      "upstreamSha256": "e0e6ac01339198f6daed94242637b4b35b6fa00822bf14452c72e8d67de2981d",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/ui/collapsible.tsx",
+      "migration": "component",
+      "changes": "Preserve upstream Base UI component presentation; local ESM imports and attribution header."
+    },
+    {
+      "localPath": "src/upstream/t3/ui/scroll-area.tsx",
+      "upstreamPath": "apps/web/src/components/ui/scroll-area.tsx",
+      "upstreamSha256": "686601d378f171fdc8a6e4a39ee17f1f95e572a79f4bd2278ed0c6aa24fdd4b6",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/ui/scroll-area.tsx",
+      "migration": "component",
+      "changes": "Preserve upstream Base UI component presentation; local ESM imports and attribution header."
+    },
+    {
+      "localPath": "src/upstream/t3/ui/spinner.tsx",
+      "upstreamPath": "apps/web/src/components/ui/spinner.tsx",
+      "upstreamSha256": "5bf21ea758d98b09da22943a065081182fd6430c5bf4402c811e9bd7eef2c863",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/ui/spinner.tsx",
+      "migration": "component",
+      "changes": "Preserve upstream Base UI component presentation; local ESM imports and attribution header."
+    },
+    {
+      "localPath": "src/upstream/t3/ui/tooltip.tsx",
+      "upstreamPath": "apps/web/src/components/ui/tooltip.tsx",
+      "upstreamSha256": "0cd5e07a71b6150a9972b544340775e40f64e42e744b573f6bac33d58f7c5c3d",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/ui/tooltip.tsx",
+      "migration": "adapted-component",
+      "changes": "Preserve upstream presentation. Add a host portal container context so popup remains under the scoped chat CSS root."
+    },
+    {
+      "localPath": "src/upstream/t3/ComposerPendingApprovalPanel.tsx",
+      "upstreamPath": "apps/web/src/components/chat/ComposerPendingApprovalPanel.tsx",
+      "upstreamSha256": "840d9ab6b51f200353f682ac9cf8faddcb99f04a0330ad37120a520c06be8f36",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/chat/ComposerPendingApprovalPanel.tsx",
+      "migration": "adapted-component",
+      "changes": "Preserve scrollable details, panel layout and title treatment; native request title takes precedence, unknown request kind is not called a file change; replace branded contract imports with presentation types."
+    },
+    {
+      "localPath": "src/upstream/t3/ComposerPendingApprovalActions.tsx",
+      "upstreamPath": "apps/web/src/components/chat/ComposerPendingApprovalActions.tsx",
+      "upstreamSha256": "4b3fa4e24bafe5fb3f013f7f08880a19d7ad0595131f83db88df7b765cbb267b",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/chat/ComposerPendingApprovalActions.tsx",
+      "migration": "adapted-component",
+      "changes": "Preserve approval button and tooltip layout. Require actual native options; remove upstream default acceptForSession/accept/decline policy. Add submitted/active boundary and stable scoped identities."
+    },
+    {
+      "localPath": "src/upstream/t3/ComposerPendingUserInputPanel.tsx",
+      "upstreamPath": "apps/web/src/components/chat/ComposerPendingUserInputPanel.tsx",
+      "upstreamSha256": "2c2c9ba48286656a9f3c77fc9d907fc1678eee0c5f35cbea5ddcc8ade6f7a74b",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/chat/ComposerPendingUserInputPanel.tsx",
+      "migration": "adapted-component",
+      "changes": "Preserve question disclosure, options, optimistic single choice, multi-select, descriptions, number shortcuts and 200 ms inter-question auto-advance. Scope shortcuts to the focused card, cancel timer when parked, add submitted/active locks and stable scoped identities. Final answer always requires explicit submission."
+    },
+    {
+      "localPath": "src/upstream/t3/pendingUserInput.ts",
+      "upstreamPath": "apps/web/src/pendingUserInput.ts",
+      "upstreamSha256": "64936f34da7565cad675c28750487f09b4cd8302e2f4405be3e5be2607f837f1",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/pendingUserInput.ts",
+      "migration": "component-logic",
+      "changes": "Retain upstream question draft/progress/answer helpers; replace upstream contract import with the native presentation contract."
+    },
+    {
+      "localPath": "src/upstream/t3/ComposerPromptEditor.tsx",
+      "upstreamPath": "apps/web/src/components/ComposerPromptEditor.tsx",
+      "upstreamSha256": "093e26aade83f6034eef3b9e820b0070fd3724c9714fc144ec3caed87ca41d99",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/ComposerPromptEditor.tsx",
+      "migration": "plain-text-editor-slice",
+      "changes": "Retain real Lexical plain-text composer, source contenteditable geometry, IME command plugin and Mac Home/End selection plugin. Add controlled plain-text sync and scoped identity. Exclude IDE inline tokens, skill/file/citation completion, terminal context, custom cursor serialization and attachment paste integration.",
+      "retainedSections": [
+        {
+          "symbol": "$appendTextWithLineBreaks",
+          "lines": [
+            830,
+            842
+          ]
+        },
+        {
+          "symbol": "ComposerCommandKeyPlugin",
+          "lines": [
+            1005,
+            1066
+          ]
+        },
+        {
+          "symbol": "ComposerHomeEndKeyPlugin",
+          "lines": [
+            1133,
+            1179
+          ]
+        }
+      ]
+    },
+    {
+      "localPath": "src/upstream/t3/ComposerPrimaryActions.tsx",
+      "upstreamPath": "apps/web/src/components/chat/ComposerPrimaryActions.tsx",
+      "upstreamSha256": "c5f6737291c2e58023d2b1203a9a62d54cadcc757b43123367231d0901164522",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/chat/ComposerPrimaryActions.tsx",
+      "migration": "send-interrupt-slice",
+      "changes": "Retain source send/interrupt button geometry and SVG. The XGC host adapter gives only the enabled send button the operator-requested black background and white arrow; disabled/busy and interrupt states retain their separate behavior. Both primary-action branches retain their square dimensions without flex shrinking in a narrow composer. Exclude IDE artwork, worktree setup, plan implementation and routing menu. Use fixed labels and actual callback capability; request submission/cancellation is provided by shared request surface."
+    },
+    {
+      "localPath": "src/upstream/t3/MessageCopyButton.tsx",
+      "upstreamPath": "apps/web/src/components/chat/MessageCopyButton.tsx",
+      "upstreamSha256": "d07b1c6b5db8259eaf88503f6f660c2252f88aff2910bee8a7c8a48b8a5c1081",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/chat/MessageCopyButton.tsx",
+      "migration": "adapted-component",
+      "changes": "Retain Button/Tooltip/icons and hover treatment. Replace IDE copy hook and anchored toast with local clipboard callback/result; add item identity."
+    },
+    {
+      "localPath": "src/upstream/t3/MessagesTimeline.tsx",
+      "upstreamPath": "apps/web/src/components/chat/MessagesTimeline.tsx",
+      "upstreamSha256": "966fb5b815d8cbcc3f391d6dfc17d35d09352a231f710ca32b1a75567de77b1d",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/chat/MessagesTimeline.tsx",
+      "migration": "presentation-slices",
+      "changes": "Adapt source list geometry and maintainScrollAtEnd policy, user bubble/disclosure, assistant row treatment and PlainWorkEntryRow keyboard disclosure into the XGC native model. Structured tool payload rendering, optional timestamps, partial-content notices, custom domain slots, an optional host-provided empty-state node and follow-state integration are XGC adaptations. The floating latest-message action is omitted; initial bottom positioning, manual history scrolling and active tail-follow remain. Preserve immutable list data and stable item/spacing callbacks across unrelated composer or host renders. This is not the original complete Timeline implementation. Exclude original IDE TimelineRowCtx, turn folding/work-group model, minimap, attachment previews, source/diff navigation, terminal contexts and per-turn scroll snapshots. Render bounded, validated MCP image thumbnails through the XGC NativeToolImages adapter beside their tool result.",
+      "retainedSections": [
+        {
+          "symbol": "TIMELINE_MAINTAIN_SCROLL_AT_END",
+          "lines": [
+            280,
+            289
+          ]
+        },
+        {
+          "symbol": "LegendList configuration and viewport",
+          "lines": [
+            818,
+            855
+          ]
+        },
+        {
+          "symbol": "user message bubble",
+          "lines": [
+            1343,
+            1520
+          ]
+        },
+        {
+          "symbol": "CollapsibleUserMessageBody",
+          "lines": [
+            2340,
+            2420
+          ]
+        },
+        {
+          "symbol": "PlainWorkEntryRow",
+          "lines": [
+            3169,
+            3361
+          ]
+        }
+      ]
+    },
+    {
+      "localPath": "src/upstream/t3/ChatMarkdown.tsx",
+      "upstreamPath": "apps/web/src/components/ChatMarkdown.tsx",
+      "upstreamSha256": "35b2e37b4ba60c6a97dfbafdc6c18fa100f1e235794dacac9dbb42abaf976c90",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/ChatMarkdown.tsx",
+      "migration": "adapted-minimal-markdown-wrapper",
+      "changes": "An adapted minimal wrapper using the upstream rendering dependency subset (react-markdown, GFM, line breaks, raw HTML parsing and sanitization) and chat-markdown typography hook, with the upstream incremental streaming parser (markdown-incremental.ts, PR #11193) gated on the isStreaming prop and a fence opener. It is not the original complete renderer or plugin pipeline. Default sanitization and ordinary safe web anchors replace the IDE-specific schema and handlers. Custom artifact directives, citation/local file resolution, source navigation, image dialog, Shiki/extra copy controls and code/diff viewers are excluded.",
+      "retainedSections": [
+        {
+          "symbol": "markdown plugin pipeline",
+          "lines": [
+            455,
+            478
+          ]
+        },
+        {
+          "symbol": "ReactMarkdown presentation",
+          "lines": [
+            3090,
+            3124
+          ]
+        }
+      ]
+    },
+    {
+      "localPath": "src/upstream/t3/markdown-incremental.ts",
+      "upstreamPath": "apps/web/src/markdown-incremental.ts",
+      "upstreamSha256": "99e6190d5a8c1278e7cc388d3235ff5ef1e9579a77d5b8a478e672491defd387",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/markdown-incremental.ts",
+      "migration": "component-logic",
+      "changes": "Preserve upstream incremental streaming Markdown parser verbatim (PR #11193): closed top-level fence followed by a blank line is the parsing boundary; definition/footnote, CR and BOM content fall back to a full parse. ChatMarkdown gates it on isStreaming and the presence of a fence opener, matching the upstream extra-plugin guard (this slice has no extra remark plugins)."
+    },
+    {
+      "localPath": "src/upstream/t3/utils.ts",
+      "upstreamPath": "apps/web/src/lib/utils.ts",
+      "upstreamSha256": "a32113c963526f42c66e6e86de913acd2014c7b37d00f492db730b755e2fadb0",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/lib/utils.ts",
+      "migration": "utility-slice",
+      "changes": "Retain cn and isMacPlatform only; remove Effect, stores and IDE helpers.",
+      "retainedSections": [
+        {
+          "symbol": "cn / isMacPlatform",
+          "lines": [
+            7,
+            14
+          ]
+        }
+      ]
+    },
+    {
+      "localPath": "src/upstream/t3/ui/select.tsx",
+      "upstreamPath": "apps/web/src/components/ui/select.tsx",
+      "upstreamSha256": "287969380877552f50c18d5f725148558412263599fd2f7a24182e6bf40172f9",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/ui/select.tsx",
+      "migration": "component",
+      "changes": "Preserve upstream Base UI presentation, local ESM imports; overlay portals use existing shared T3PortalContainer to remain inside XGC CSS scope."
+    },
+    {
+      "localPath": "src/upstream/t3/ui/popover.tsx",
+      "upstreamPath": "apps/web/src/components/ui/popover.tsx",
+      "upstreamSha256": "ee7a72b23cb8e4089ee921d6829cfe61f8853f8c695125749da4bac2d5098438",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/ui/popover.tsx",
+      "migration": "component",
+      "changes": "Preserve upstream Base UI presentation, local ESM imports; overlay portals use existing shared T3PortalContainer to remain inside XGC CSS scope."
+    },
+    {
+      "localPath": "src/upstream/t3/ui/input.tsx",
+      "upstreamPath": "apps/web/src/components/ui/input.tsx",
+      "upstreamSha256": "fdb2c2d8faf6d37b6c31ce69e04c90624189f489674bf4cbfe643949194e4649",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/ui/input.tsx",
+      "migration": "component",
+      "changes": "Preserve upstream Base UI presentation, local ESM imports; overlay portals use existing shared T3PortalContainer to remain inside XGC CSS scope. Explicitly consume the discarded Base UI-only onValueChange binding for the shared lint contract."
+    },
+    {
+      "localPath": "src/upstream/t3/ui/textarea.tsx",
+      "upstreamPath": "apps/web/src/components/ui/textarea.tsx",
+      "upstreamSha256": "9a8d3be108378d6a33b8fa7581474d3732167cf76054d342bf8c7d20d171975e",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/ui/textarea.tsx",
+      "migration": "component",
+      "changes": "Preserve upstream Base UI presentation, local ESM imports; overlay portals use existing shared T3PortalContainer to remain inside XGC CSS scope."
+    },
+    {
+      "localPath": "src/upstream/t3/ui/switch.tsx",
+      "upstreamPath": "apps/web/src/components/ui/switch.tsx",
+      "upstreamSha256": "de403c91bf1c62db7a947347a7cee76688017fd304181a57051db88e5b5a2cbb",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/ui/switch.tsx",
+      "migration": "component",
+      "changes": "Preserve upstream Base UI presentation, local ESM imports; overlay portals use existing shared T3PortalContainer to remain inside XGC CSS scope."
+    },
+    {
+      "localPath": "src/upstream/t3/ui/separator.tsx",
+      "upstreamPath": "apps/web/src/components/ui/separator.tsx",
+      "upstreamSha256": "b99515751890f0d4c61b06e3badd14ccec6ee7104238135602ca0a2f119f476e",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/ui/separator.tsx",
+      "migration": "component",
+      "changes": "Preserve upstream Base UI presentation, local ESM imports; overlay portals use existing shared T3PortalContainer to remain inside XGC CSS scope."
+    },
+    {
+      "localPath": "src/upstream/t3/ui/combobox.tsx",
+      "upstreamPath": "apps/web/src/components/ui/combobox.tsx",
+      "upstreamSha256": "22462a29b5e9ae477aed7d30a7bc0f6cb156ead3e9fa658a4ce5f62c9625db7d",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/ui/combobox.tsx",
+      "migration": "component",
+      "changes": "Preserve upstream Base UI presentation, local ESM imports; overlay portals use existing shared T3PortalContainer to remain inside XGC CSS scope."
+    },
+    {
+      "localPath": "src/upstream/t3/ui/draft-input.tsx",
+      "upstreamPath": "apps/web/src/components/ui/draft-input.tsx",
+      "upstreamSha256": "5fa2a5689475342b91305b653c6227264427988065706fb40815d0afc4f761ec",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/ui/draft-input.tsx",
+      "migration": "component",
+      "changes": "Preserve upstream Base UI presentation, local ESM imports; overlay portals use existing shared T3PortalContainer to remain inside XGC CSS scope."
+    },
+    {
+      "localPath": "src/upstream/t3/ui/menu.tsx",
+      "upstreamPath": "apps/web/src/components/ui/menu.tsx",
+      "upstreamSha256": "84d91b40058478dacfb984678a44c756abc092c2263f1fc74ff59db9a3904feb",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/ui/menu.tsx",
+      "migration": "component",
+      "changes": "Preserve upstream Base UI presentation, local ESM imports; overlay portals use existing shared T3PortalContainer to remain inside XGC CSS scope."
+    },
+    {
+      "localPath": "src/upstream/t3/useCommitOnBlur.ts",
+      "upstreamPath": "apps/web/src/hooks/useCommitOnBlur.ts",
+      "upstreamSha256": "e4b233cbe9189e61f886ea458741f2b2a94859ed932c6d826e9d242e7ec5e4d3",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/hooks/useCommitOnBlur.ts",
+      "migration": "component",
+      "changes": "Local ESM imports and attribution; implementation and utility classes preserved."
+    },
+    {
+      "localPath": "src/upstream/t3/ComposerControl.tsx",
+      "upstreamPath": "apps/web/src/components/chat/ComposerControl.tsx",
+      "upstreamSha256": "b36694190ab1ea1d9c85d249a9b2dad74aa3a58ed25f9081c7df5d5b7d4aaac1",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/chat/ComposerControl.tsx",
+      "migration": "component",
+      "changes": "Local ESM imports and attribution; implementation and utility classes preserved."
+    },
+    {
+      "localPath": "src/upstream/t3/settings/ProviderSettingsForm.tsx",
+      "upstreamPath": "apps/web/src/components/settings/ProviderSettingsForm.tsx",
+      "upstreamSha256": "208aa535fbfc1b8249d2a98762e8c5fba430c981b5b947c0947588b5e3d4ef13",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/settings/ProviderSettingsForm.tsx",
+      "migration": "component",
+      "changes": "Retain field renderer and nextProviderConfigWithFieldValue; accept explicit reviewed field descriptors instead of Effect schema annotations; host-owned persistence, no T3 store; stable annotation leaves added. Settings variant uses immediate controlled Input changes rather than blur-only draft commit so the explicit Save adapter captures the first edit revision. Native whitelist provides fields; empty select value is an explicit provider-default choice."
+    },
+    {
+      "localPath": "src/upstream/t3/settings/SettingsRow.tsx",
+      "upstreamPath": "apps/web/src/components/settings/settingsLayout.tsx",
+      "upstreamSha256": "f7e47e7f0c039bdd71847524e7d51a757e0b799b3e86f4f6e6b21ddc974541eb",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/settings/settingsLayout.tsx",
+      "migration": "component",
+      "changes": "Extract SettingsRow markup; remove T3 search/server-scope stores. Host controls availability and callbacks."
+    },
+    {
+      "localPath": "src/upstream/t3/searchRanking.ts",
+      "upstreamPath": "packages/shared/src/searchRanking.ts",
+      "upstreamSha256": "f2df1729c7dd5086cbf3a211178f773712af28a00e415984399ffa8423eacbb5",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/packages/shared/src/searchRanking.ts",
+      "migration": "adapted component slice",
+      "changes": "Attribution header; preserve ranking functions."
+    },
+    {
+      "localPath": "src/upstream/t3/modelPickerSearch.ts",
+      "upstreamPath": "apps/web/src/components/chat/modelPickerSearch.ts",
+      "upstreamSha256": "3ffdb16238186e108b5a00d6e4f1a2af5c3990bed1b556b4249c237ab2a0a133",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/chat/modelPickerSearch.ts",
+      "migration": "adapted component slice",
+      "changes": "Local ESM import; preserve model search ranking."
+    },
+    {
+      "localPath": "src/upstream/t3/ProviderIcons.tsx",
+      "upstreamPath": "apps/web/src/components/Icons.tsx",
+      "upstreamSha256": "d5e70eeecb8d930c4976f1d302b401c90ac0d78cc2becb4d23e522a7ed8b2354",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/Icons.tsx",
+      "migration": "adapted component slice",
+      "changes": "Only five provider brand glyphs. Remove redundant OpenCode rectangular clip definition to avoid duplicate DOM ids."
+    },
+    {
+      "localPath": "src/upstream/t3/ProviderModelPicker.tsx",
+      "upstreamPath": "apps/web/src/components/chat/ProviderModelPicker.tsx",
+      "upstreamSha256": "b1c99c899ee4cd9e0a975abb45771154c9f0654ed7292aa33c53fc2ddeb0b5e3",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/chat/ProviderModelPicker.tsx",
+      "migration": "adapted component slice",
+      "changes": "Adapt trigger/popover, provider rail, search keyboard behavior and model row markup to verified native catalogs. Keep upstream search ranking. Remove environment/favorite/legacy/continuation/IDE state, global document scroll locks and per-instance badges. Use the same Base UI collection without the upstream LegendList virtualization layer; capability catalogs are bounded by the shared decoder. Add stable identities and exact provider/model routing."
+    },
+    {
+      "localPath": "src/upstream/t3/ProviderModelPicker.tsx",
+      "upstreamPath": "apps/web/src/components/chat/ModelPickerContent.tsx",
+      "upstreamSha256": "b10a83f735d45c6f9d22310b19f0f2d1ae6b2b00fdba85ed7285bbdbded1028b",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/chat/ModelPickerContent.tsx",
+      "migration": "adapted component slice",
+      "changes": "Adapt trigger/popover, provider rail, search keyboard behavior and model row markup to verified native catalogs. Keep upstream search ranking. Remove environment/favorite/legacy/continuation/IDE state, global document scroll locks and per-instance badges. Use the same Base UI collection without the upstream LegendList virtualization layer; capability catalogs are bounded by the shared decoder. Add stable identities and exact provider/model routing."
+    },
+    {
+      "localPath": "src/upstream/t3/ProviderModelPicker.tsx",
+      "upstreamPath": "apps/web/src/components/chat/ModelPickerSidebar.tsx",
+      "upstreamSha256": "4f4f3c608d12d2becefef7d4b8c93e6f7f8cac33799d93cb6e2c69a8397dddb7",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/chat/ModelPickerSidebar.tsx",
+      "migration": "adapted component slice",
+      "changes": "Adapt trigger/popover, provider rail, search keyboard behavior and model row markup to verified native catalogs. Keep upstream search ranking. Remove environment/favorite/legacy/continuation/IDE state, global document scroll locks and per-instance badges. Use the same Base UI collection without the upstream LegendList virtualization layer; capability catalogs are bounded by the shared decoder. Add stable identities and exact provider/model routing."
+    },
+    {
+      "localPath": "src/upstream/t3/ProviderModelPicker.tsx",
+      "upstreamPath": "apps/web/src/components/chat/ModelListRow.tsx",
+      "upstreamSha256": "a5994b7ecc9027bf72208db834da47a62968d60198d07973230733e46399ea10",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/chat/ModelListRow.tsx",
+      "migration": "adapted component slice",
+      "changes": "Adapt trigger/popover, provider rail, search keyboard behavior and model row markup to verified native catalogs. Keep upstream search ranking. Remove environment/favorite/legacy/continuation/IDE state, global document scroll locks and per-instance badges. Use the same Base UI collection without the upstream LegendList virtualization layer; capability catalogs are bounded by the shared decoder. Add stable identities and exact provider/model routing."
+    },
+    {
+      "localPath": "src/upstream/t3/ComposerOptionControls.tsx",
+      "upstreamPath": "apps/web/src/components/chat/ChatComposer.tsx",
+      "upstreamSha256": "eb706eefa71ed224a4f2cb09f0085f391da217ba6057146e401b40efa7266ae0",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/chat/ChatComposer.tsx",
+      "migration": "adapted component slice",
+      "changes": "Extract ComposerFooterModeControls permission trigger/item layout and TraitsPicker radio-menu/trigger pattern. Options and labels exclusively from native capability metadata; omit interaction modes, inferred model traits, prompt-injected effort, fast mode and unsupported auto permission. Scope popups and add stable identities."
+    },
+    {
+      "localPath": "src/upstream/t3/ComposerOptionControls.tsx",
+      "upstreamPath": "apps/web/src/components/chat/TraitsPicker.tsx",
+      "upstreamSha256": "7d745dc2df6e8fdc6e915059a6ac650cd93839e054d8bc0ee5965494f8520d86",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/chat/TraitsPicker.tsx",
+      "migration": "adapted component slice",
+      "changes": "Extract ComposerFooterModeControls permission trigger/item layout and TraitsPicker radio-menu/trigger pattern. Options and labels exclusively from native capability metadata; omit interaction modes, inferred model traits, prompt-injected effort, fast mode and unsupported auto permission. Scope popups and add stable identities."
+    },
+    {
+      "localPath": "src/upstream/t3/settings/ProviderSettingsPanel.tsx",
+      "upstreamPath": "apps/web/src/components/settings/ProviderSettingsPanel.tsx",
+      "upstreamSha256": "a5c01633e617fe74969185388d524630332a9a63ef923b306f7b88e144b16c34",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/settings/ProviderSettingsPanel.tsx",
+      "migration": "adapted component slice",
+      "changes": "Extract list/editor layout and provider list-card markup. Configuration, enable/save and explicit refresh are handled by the shared XGC adapter, not the T3 environment store. Omit instance creation/deletion, updater, usage and setup/install flows. ProviderSetupSection was inspected but is Antigravity-specific and is not migrated for these five providers."
+    },
+    {
+      "localPath": "src/upstream/t3/settings/ProviderSettingsPanel.tsx",
+      "upstreamPath": "apps/web/src/components/settings/ProviderInstanceCard.tsx",
+      "upstreamSha256": "04aac26c9d2805f7a4ee9e0d04b79c0d1edee57bd136a01442c1be7084af53bb",
+      "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/settings/ProviderInstanceCard.tsx",
+      "migration": "adapted component slice",
+      "changes": "Extract list/editor layout and provider list-card markup. Configuration, enable/save and explicit refresh are handled by the shared XGC adapter, not the T3 environment store. Omit instance creation/deletion, updater, usage and setup/install flows. ProviderSetupSection was inspected but is Antigravity-specific and is not migrated for these five providers."
+    }
+  ],
+  "hostIntegrationFiles": [
+    "src/T3Conversation.tsx",
+    "src/NativeConversation.tsx",
+    "src/nativePresentation.ts",
+    "src/upstream/t3/types.ts",
+    "src/upstream/t3/identity.ts",
+    "src/t3-theme.css",
+    "src/t3-host-tokens.css",
+    "scripts/scope-styles.mjs",
+    "src/NativeProviderSettings.tsx",
+    "src/NativeComposerControls.tsx",
+    "src/providerSettings.ts"
+  ],
+  "validationFiles": [
+    "src/upstream/t3/T3Conversation.test.tsx",
+    "src/upstream/t3/markdown-incremental.test.tsx"
+  ],
+  "styleManifest": "STYLE_UPSTREAM.json",
+  "upstreamPnpmPatchesApplied": [],
+  "legendListNote": "Consume the original published @legendapp/list 3.3.5 package. The T3 pnpm patch set is not applied. This slice does not configure anchoredEndSpace or inline calc scroll padding; do not assume those patched features are available.",
+  "upstreamLicenseSha256": "935d8f2af0c703f9c39517ee57cc4930b19d02d533be930b63f0e82f93614b43",
+  "hostIntegrationOwnership": "These files are XGC-owned composition, native-protocol mapping, callback authority, host identities and style-build adapters. They are not upstream T3 Code components.",
+  "nativeProtocolOwnership": {
+    "package": "@xgc2/agent-runtime",
+    "files": [
+      "src/state.ts",
+      "src/client.ts",
+      "src/useNativeStream.ts"
+    ],
+    "note": "The shared native state, transport and request-answer contract are owned by XGC. This presentation migration does not import the T3 Code server or its Codex app-server client."
+  },
+  "styleIntegration": {
+    "manifest": "STYLE_UPSTREAM.json",
+    "selectorScope": ".xgc-native-chat via native CSS @scope; no unsupported-browser fallback is provided",
+    "reset": "Tailwind preflight is included inside the chat scope. It is not installed as a global page reset, and it also applies to custom timeline slots inside that scope.",
+    "globalRegistrations": "CSS @property and keyframes registrations remain global and are renamed with --xgc-t3- / xgc-t3- prefixes.",
+    "hostRequirements": [
+      "explicit @xgc2/agent-runtime/styles.css import",
+      "XGC semantic CSS tokens and fonts",
+      "data-skin light/dark theme identity",
+      "a bounded conversation viewport"
+    ],
+    "boundary": "CSS selector scoping is not Shadow DOM isolation. Host inheritance and domain content rendered inside the scope remain part of the integration contract. Native capsule roots do not create stacking isolation: their existing portal layer must remain interactive above later sibling capsules. A single-row controls layout gives the model flexible width, preserves effort text and uses the existing permission-state icon in a narrow row with full accessible/tooltip/menu text. The size container stays on the controls row, outside its portal siblings.",
+    "adaptations": "Host aliases include colors, fonts, scrollbars, radius, glass values and container sizing; they are not color-only changes. Main upstream geometry is retained without promising pixel equivalence to every upstream theme.",
+    "additionalUpstreamConstants": {
+      "path": "apps/web/src/index.css",
+      "ref": "bf3be75c400cf605dc0c80de9458458854c84131",
+      "sha256": "23afd315b595971cde86dbd514bfdf561535416e2b50d1e51956056f3231dc84",
+      "sections": [
+        {
+          "lines": [
+            80,
+            80
+          ],
+          "purpose": "scrollbar width"
+        },
+        {
+          "lines": [
+            91,
+            91
+          ],
+          "purpose": "control radius"
+        },
+        {
+          "lines": [
+            103,
+            105
+          ],
+          "purpose": "default glass values"
+        },
+        {
+          "lines": [
+            956,
+            956
+          ],
+          "purpose": "radius scale"
+        }
+      ],
+      "themeDifference": "The host adapter uses the upstream default glass values and does not reproduce the upstream dark overrides at lines 120-121."
+    }
+  },
+  "consumerContract": {
+    "runtime": "React 19 peers; ESM package exports. TypeScript typesVersions support older resolver modes but do not supply a CommonJS require build.",
+    "presentation": "Research and GCS use one shared conversation and request surface. Domain business content is accepted through custom timeline slots, not by importing host business logic into the shared package.",
+    "callbacks": "Send, request answer, request cancellation and whole-turn interruption remain distinct real callbacks. Submitted requests stay locked pending native resolution. Missing send/interrupt capabilities do not create placeholder operation controls.",
+    "drafts": "Controlled drafts are retained on send failure and are cleared on success only if unchanged; host domains own session-specific persistence and idempotency.",
+    "ssr": "The virtualized timeline renders an unmeasured viewport on the server; message rows appear after browser measurement. ESM/SSR import support is not full server rendering of the message history.",
+    "localization": "locale=zh localizes selected mapper labels. Upstream Composer, request actions and other controls still use English. NativeInput does not currently consume its locale prop. New NativeProviderSettings and NativeComposerControls support en/zh for fixed UI labels; native capability labels/IDs are not translated.",
+    "toolPresentation": "Structured command, file-change and MCP fields have selected presentation support. commandActions and webSearch details can be retained in native state without a dedicated rich view. This is not complete T3 Code or Codex protocol UI coverage.",
+    "history": "Missing timestamps are not manufactured. Partial payloads are marked; historical free-form answers are not reconstructed from submission/resolution events.",
+    "providerSettings": "NativeProviderSettings accepts the decoded settings document plus explicit onSave(update) and onRefresh(profileId) callbacks. Shared whitelist exposes enabled, CLI path and verified default model/effort/permission fields. Draft revisions are captured at the first edit and preserved across refreshes and failures. No authentication credentials or environment configuration.",
+    "composerOptions": "NativeComposerControls accepts provider capabilities, a controlled NativeComposerSelection and an onChange callback. Selection changes only host draft state; NativeConversation accepts a composerControls slot. Exact options are passed by the host as the fourth sendNativePrompt argument or Scope.options at create. Cross-provider selection does not copy previous permissions or effort. No session/project/Git management UI. Optional identityId scopes annotation roles when multiple real controls share a provider."
+  },
+  "resync": "2026-09-15: 6349a0e -> bf3be75. Ported: timeline smooth follow-scroll while streaming (reduced-motion guarded); composer banner 1px mask seam fix; button active-scale excluded for popup triggers; select showCheck removal; switch mixed state; scroll-area scrollFadePadding; combobox single-select anchor fix + chip a11y; useCommitOnBlur IME guard; collapsible reduced-motion; SettingsRow aria-disabled. Reviewed, not applicable: ChatComposer rewrite areas outside the option-controls slice; editor terminal-context/clipboard refactors; full ChatMarkdown renderer (Shiki/diff/task-list); model-picker sidebar/favorites/shortcuts; pending-question attachments and dismiss (need native contract first); MessageCopyButton extraFlavors (no consumer); spinner visible-animation system. 2026-09-17: aligned per-file upstreamUrl pins, source header refs and UPSTREAM.md prose to bf3be75; verified recorded upstreamSha256 against bf3be75 content (spot-checked ui/tooltip.tsx, ui/button.tsx). 2026-09-17: single-point port review of the streaming-chat improvements, all confirmed ancestors of the bf3be75 pin. Ported PR #11193 (markdown-incremental.ts verbatim plus ChatMarkdown wiring with an isStreaming prop handed off from the assistant timeline row); unified 11.0.5 and @types/mdast 4.0.4 promoted to direct dependencies. Reviewed, not applicable: #10444/#10437/#10463 composer collapse and focus restoration live in the excluded ChatView/ChatComposer footer-layout and composer-handle layers (no composer collapse exists in this slice); #11884 requires the excluded composerHandleContext focus bridge; #10118 targets the excluded MessagesTimeline.logic checkpoint map (no checkpoint concept here); the 7fbc545a/de545c41/11601da8 banner/footer fixes were already ported in the 2026-09-15 resync. Open, not ported: #11442 large-paste text attachments (attachment pipeline excluded); #11673 queuedMessageStore semantics only compared against NativePromptQueue (missing semantics recorded in UPSTREAM.md), implementation not ported (zustand/T3 contracts coupling)."
+}

@@ -1,0 +1,11 @@
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/preflight.css" layer(base);
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
+@import "./t3-upstream.css";
+@source "./upstream";
+@source "./T3Conversation.tsx";
+@source "./NativeComposerControls.tsx";
+@source "./NativeProviderSettings.tsx";
+@custom-variant dark (&:where([data-skin=dark], [data-skin=dark] *));
+@custom-variant light (&:where([data-skin=light], [data-skin=light] *));

@@ -1,0 +1,96 @@
+{
+  "name": "@xgc2/agent-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "typesVersions": {
+    "*": {
+      "state": [
+        "dist/state.d.ts"
+      ],
+      "client": [
+        "dist/client.d.ts"
+      ],
+      "react": [
+        "dist/react.d.ts"
+      ],
+      "*": [
+        "dist/index.d.ts"
+      ]
+    }
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./state": {
+      "types": "./dist/state.d.ts",
+      "import": "./dist/state.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "import": "./dist/react.js"
+    },
+    "./styles.css": "./dist/native-chat.css"
+  },
+  "files": [
+    "dist",
+    "LICENSE.T3Code",
+    "UPSTREAM.json",
+    "UPSTREAM.md",
+    "STYLE_UPSTREAM.json"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && npm run build:styles",
+    "build:styles": "tailwindcss -i src/t3-theme.css -o dist/native-chat.unscoped.css && node scripts/scope-styles.mjs",
+    "test": "npm run build && vitest run && node --test test/*.test.mjs",
+    "lint": "eslint src test scripts",
+    "prepack": "npm run build"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "dependencies": {
+    "@base-ui/react": "1.5.0",
+    "@legendapp/list": "3.3.5",
+    "@lexical/react": "0.41.0",
+    "class-variance-authority": "0.7.1",
+    "clsx": "2.1.1",
+    "lexical": "0.41.0",
+    "lucide-react": "0.564.0",
+    "react-markdown": "10.1.0",
+    "rehype-raw": "7.0.0",
+    "rehype-sanitize": "6.0.0",
+    "remark-breaks": "4.0.0",
+    "remark-gfm": "4.0.1",
+    "tailwind-merge": "3.6.0",
+    "unified": "11.0.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.1",
+    "@tailwindcss/cli": "4.3.3",
+    "@testing-library/react": "16.3.0",
+    "@types/mdast": "4.0.4",
+    "@types/node": "22.19.3",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "eslint": "9.39.1",
+    "eslint-plugin-react-hooks": "7.0.1",
+    "globals": "16.5.0",
+    "jsdom": "26.1.0",
+    "postcss": "8.5.6",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.48.1",
+    "vitest": "3.2.4"
+  }
+}

@@ -1,0 +1,93 @@
+/* Host semantic token adapter; preserve the selected T3 Code typography and geometry. */
+:scope {
+  --xgc-t3-font-sans: var(--font-sans);
+  --xgc-t3-font-mono: var(--font-mono);
+  --background: var(--color-bg-surface);
+  --foreground: var(--color-text);
+  --contrast-foreground: var(--color-text);
+  --card: var(--color-bg-surface);
+  --contrast-card-foreground: var(--color-text);
+  --surface-raised: var(--color-bg-control);
+  --popover: var(--color-bg-control);
+  --contrast-popover-foreground: var(--color-text);
+  --primary: var(--color-bg-primary);
+  --primary-foreground: var(--color-text-inverse);
+  --secondary: var(--color-bg-subtle);
+  --contrast-secondary-foreground: var(--color-text-soft);
+  --muted: var(--color-bg-muted);
+  --contrast-muted-foreground: var(--color-text-muted);
+  --contrast-secondary-label: var(--color-text-muted);
+  --contrast-placeholder: var(--color-text-faint);
+  --contrast-icon-muted: var(--color-text-muted);
+  --accent: var(--color-bg-control-hover);
+  --contrast-accent-foreground: var(--color-text-strong);
+  --contrast-border: var(--color-border-muted);
+  --contrast-input: var(--color-border);
+  --ring: var(--color-border-focus);
+  --message-surface: var(--color-bg-subtle);
+  --contrast-message-foreground: var(--color-text);
+  --message-action: var(--color-bg-control);
+  --message-action-foreground: var(--color-text-muted);
+  --message-action-hover: var(--color-bg-control-hover);
+  --destructive: var(--color-danger);
+  --destructive-foreground: var(--color-danger);
+  --warning: var(--color-warning);
+  --warning-foreground: var(--color-warning);
+  --warning-surface: var(--color-bg-warning);
+  --error: var(--color-danger);
+  --error-foreground: var(--color-danger);
+  --error-surface: var(--color-bg-danger);
+  --tool-error-icon: var(--color-danger);
+  --success: var(--color-success);
+  --success-foreground: var(--color-success);
+  --info: var(--color-text-soft);
+  --info-foreground: var(--color-text);
+  --info-surface: var(--color-bg-subtle);
+  --app-scrollbar-width: 6px;
+  --app-scrollbar-thumb: var(--color-border);
+  --app-scrollbar-thumb-hover: var(--color-border-hover);
+  --control-radius: 0.5rem;
+  /* T3 Code index.css:956; feeds its radius utility scale. */
+  --radius: 0.625rem;
+  --glass-blur: 12px;
+  --glass-opacity: 80%;
+  --glass-saturation: 1.14;
+  color: var(--color-text);
+  font-family: inherit;
+  min-width: 0;
+  min-height: 0;
+}
+:scope[data-xgc-role="native-agent-conversation"] { height: 100%; }
+/* @scope contains styles; a stacking context here would trap native menus
+   beneath a later sibling conversation. Keep the existing portal layer. */
+/* The operator-selected send treatment only applies when sending is enabled.
+   Empty/busy input and the separate interrupt action retain their own states. */
+:scope [data-xgc-role="native-agent-send"]:enabled {
+  background-color: var(--xgc-t3-color-black);
+  color: var(--xgc-t3-color-white);
+}
+/* Model, effort and permission stay on one composer row. Menus portal to the
+   host, so do not clip overflow on this element. */
+:scope[data-xgc-role="native-composer-controls"] [data-xgc-composer-row] {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  min-width: 0;
+  width: 100%;
+  /* Only the row is a size container; native portals remain its siblings. */
+  container: xgc-native-composer / inline-size;
+}
+:scope[data-xgc-role="native-composer-controls"] [data-xgc-composer-row] > * {
+  min-width: 0;
+  flex-shrink: 0;
+}
+:scope[data-xgc-role="native-composer-controls"] [data-xgc-composer-row] > [data-xgc-role="native-composer-model"] {
+  flex: 1 1 auto;
+}
+/* Keep the real permission state identifiable without truncating its name:
+   narrow rows use the existing state icon, full accessible text and menu. */
+@container xgc-native-composer (max-width: 20rem) {
+  :scope [data-xgc-role="native-composer-permission"] [data-xgc-permission-label] {
+    display: none;
+  }
+}

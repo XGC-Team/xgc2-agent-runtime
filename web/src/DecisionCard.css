@@ -1,0 +1,57 @@
+/* Shared by native tool permission requests and ground station decisions. */
+.xgc-decision-card {
+  --xgc-decision-bg: var(--color-bg-surface);
+  --xgc-decision-fg: var(--color-text);
+  --xgc-decision-muted: color-mix(in srgb, var(--xgc-decision-fg) 72%, var(--xgc-decision-bg));
+  --xgc-decision-surface: color-mix(in srgb, var(--xgc-decision-fg) 16%, var(--xgc-decision-bg));
+  display: grid;
+  gap: var(--space-sm);
+  min-width: 0;
+  padding: var(--space-md);
+  border: var(--stroke-thin) solid var(--xgc-decision-surface);
+  border-radius: var(--radius-md);
+  background: var(--xgc-decision-bg);
+  color: var(--xgc-decision-fg);
+  font-family: var(--font-sans);
+  font-size: var(--font-base);
+}
+
+[data-skin='light'] .xgc-decision-card {
+  --xgc-decision-bg: var(--color-text-strong);
+  --xgc-decision-fg: var(--color-text-inverse);
+}
+
+.xgc-decision-card-heading,
+.xgc-decision-card-footer,
+.xgc-decision-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.xgc-decision-card-heading { justify-content: space-between; }
+.xgc-decision-card-title { min-width: 0; font-weight: var(--weight-medium); overflow-wrap: anywhere; }
+.xgc-decision-card-heading time,
+.xgc-decision-card-status { color: var(--xgc-decision-muted); font-size: var(--font-sm); }
+.xgc-decision-card-body { min-width: 0; overflow-wrap: anywhere; }
+.xgc-decision-card-footer { border-top: var(--stroke-thin) solid var(--xgc-decision-surface); padding-top: var(--space-sm); }
+.xgc-decision-card-actions { flex: 1 1 100%; }
+.xgc-decision-card-actions > * { flex: 1 1 auto; min-width: 0; }
+.xgc-decision-card-review { margin: 0; max-height: 20rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: var(--font-sm); color: inherit; }
+.xgc-decision-card-error { color: var(--xgc-decision-fg); }
+.xgc-decision-card-details { min-width: 0; color: var(--xgc-decision-muted); font-size: var(--font-sm); }
+.xgc-decision-card-details summary { cursor: pointer; width: fit-content; }
+.xgc-decision-card-detail-content { display: grid; gap: var(--space-sm); padding-top: var(--space-sm); color: var(--xgc-decision-fg); }
+.xgc-decision-card ::selection { color: var(--xgc-decision-bg); background: var(--xgc-decision-fg); }
+
+/* Native controls consume T3 aliases; the shared host tokens remain untouched. */
+.xgc-native-chat .xgc-decision-card {
+  --foreground: var(--xgc-decision-fg);
+  --contrast-muted-foreground: var(--xgc-decision-muted);
+  --contrast-secondary-foreground: var(--xgc-decision-fg);
+  --accent: var(--xgc-decision-surface);
+  --border: var(--xgc-decision-surface);
+  --contrast-accent-foreground: var(--xgc-decision-fg);
+}

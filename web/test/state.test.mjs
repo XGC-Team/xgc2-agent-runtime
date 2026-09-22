@@ -1,0 +1,47 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { applyEvent, decodeEvent, decodeSession, decodeProfiles, emptyStream, NATIVE_SCHEMA } from '../dist/state.js'
+const event = (seq, extra = {}) => ({ schemaVersion: NATIVE_SCHEMA, sessionId: 's_test', provider: 'codex', seq, kind: 'item.delta', turnId: 't_test', itemId: 'message', role: 'assistant', text: 'hello', ...extra })
+const empty = () => emptyStream('s_test', 'codex')
+const session = () => ({ schemaVersion: NATIVE_SCHEMA, id: 's_test', provider: 'codex', state: 'ready', createdAt: '2026-09-05T00:00:00Z', lastSeq: 3, title: 'Review', archived: false, metadataRevision: 1, scope: { profileId: 'codex', context: { kind: 'fixture', id: 'p' }, workspace: { id: 'w', revision: 'a'.repeat(40) }, nativeAccessConfirmed: true } })
+test('incremental text is accumulated into one item', () => { const s = applyEvent(applyEvent(empty(), event(1)), event(2, { text: '世界' })); assert.equal(s.items.length, 1); assert.equal(s.items[0].text, 'hello世界') })
+test('a final snapshot replaces partial text instead of appending', () => { const s = applyEvent(applyEvent(empty(), event(1)), event(2, { kind: 'item.snapshot', text: 'final' })); assert.equal(s.items[0].text, 'final') })
+test('status-only tool patches preserve output', () => { const s = applyEvent(applyEvent(empty(), event(1, { role: 'tool', text: 'stdout' })), event(2, { role: 'tool', kind: 'item.patch', status: 'completed', text: undefined })); assert.equal(s.items[0].text, 'stdout'); assert.equal(s.items[0].status, 'completed') })
+test('message identity includes the local turn', () => { const s = applyEvent(applyEvent(empty(), event(1)), event(2, { turnId: 't_other' })); assert.equal(s.items.length, 2) })
+test('exact SSE replay does not duplicate text', () => { const s = applyEvent(empty(), event(1)); assert.equal(applyEvent(s, event(1)), s) })
+test('same sequence with different content fails closed', () => { const s = applyEvent(empty(), event(1)); assert.throws(() => applyEvent(s, event(1, { text: 'changed' }))) })
+test('event gaps require display recovery, not prompt retry', () => { assert.throws(() => applyEvent(empty(), event(2)), /缺口/) })
+test('cross-session events cannot be merged even on duplicate sequence', () => { assert.throws(() => applyEvent(applyEvent(empty(), event(1)), event(1, { sessionId: 's_other' })), /身份链/) })
+test('provider identity cannot drift', () => { assert.throws(() => applyEvent(empty(), event(1, { provider: 'claude' }))) })
+test('unknown event/schema is visible failure', () => { assert.throws(() => applyEvent(empty(), event(1, { kind: 'mystery' }))); assert.throws(() => applyEvent(empty(), event(1, { schemaVersion: 'v2' }))) })
+test('a source item cannot change role', () => { assert.throws(() => applyEvent(applyEvent(empty(), event(1)), event(2, { role: 'tool' }))) })
+test('native session identity cannot be replaced', () => { const s = applyEvent(empty(), event(1, { kind: 'session.identity', nativeSessionId: 'n1' })); assert.throws(() => applyEvent(s, event(2, { kind: 'session.identity', nativeSessionId: 'n2' }))) })
+const request = { id: 'q_1', kind: 'permission', title: 'Read file', options: [{ id: 'allow', label: 'Allow once', kind: 'allow_once' }], questions: [] }
+const requested = () => applyEvent(empty(), event(1, { kind: 'input.request', itemId: 'q_1', request }))
+test('pending input uses the exact request identity', () => { assert.equal(requested().pending.q_1.title, 'Read file'); assert.throws(() => applyEvent(empty(), event(1, { kind: 'input.request', itemId: 'q_other', request }))) })
+test('submitted is not approval or completion', () => { const s = applyEvent(requested(), event(2, { kind: 'input.submitted', itemId: 'q_1' })); assert.equal(s.pending.q_1.submitted, true); assert.equal(s.lastTurnStatus, '') })
+test('native expiry removes approval buttons', () => { const s = applyEvent(requested(), event(2, { kind: 'input.resolved', itemId: 'q_1', status: 'expired' })); assert.deepEqual(s.pending, {}) })
+test('host restart makes old requests inactive', () => { const s = applyEvent(requested(), event(2, { kind: 'session.state', status: 'disconnected' })); assert.deepEqual(s.pending, {}); assert.equal(s.worker, 'disconnected') })
+test('session state diagnostic text is not an operator notice', () => {
+  const s = applyEvent(empty(), event(1, { kind: 'session.state', status: 'starting', text: 'Explicit native resume; no prior prompt is replayed.' }))
+  assert.deepEqual(s.notices, [])
+  assert.equal(s.worker, 'starting')
+})
+test('empty native notices do not invent operator copy', () => {
+  const s = applyEvent(empty(), event(1, { kind: 'notice', text: undefined }))
+  assert.deepEqual(s.notices, [])
+})
+test('an unknown terminal result is never rewritten to success', () => { const s = applyEvent(requested(), event(2, { kind: 'turn.end', status: 'unknown' })); assert.equal(s.lastTurnStatus, 'unknown'); assert.deepEqual(s.pending, {}) })
+test('unsafe numeric cursors are rejected', () => { for (const seq of [-1, 0, 1.5, Number.MAX_SAFE_INTEGER + 1]) assert.throws(() => decodeEvent(event(seq), 's_test', 'codex')) })
+test('native metadata requires a reviewed workspace reference', () => { assert.equal(decodeSession(session()).id, 's_test'); const invalid = session(); invalid.scope.workspace.revision = ''; assert.throws(() => decodeSession(invalid)) })
+test('missing consent metadata is not silently accepted', () => { const invalid = session(); delete invalid.scope.nativeAccessConfirmed; assert.throws(() => decodeSession(invalid)); invalid.scope.nativeAccessConfirmed = false; assert.throws(() => decodeSession(invalid)) })
+test('conversation metadata is required and preserves a valid Unicode title', () => {
+  for (const key of ['title', 'archived', 'metadataRevision']) { const invalid = session(); delete invalid[key]; assert.throws(() => decodeSession(invalid)) }
+  assert.equal(decodeSession({ ...session(), title: '🚁'.repeat(160) }).title, '🚁'.repeat(160))
+  assert.throws(() => decodeSession({ ...session(), metadataRevision: 0 }))
+  assert.throws(() => decodeSession({ ...session(), title: 'line\nbreak' }))
+})
+test('capability declaration keeps Claude narrower than ACP', () => { const profiles = decodeProfiles([{ id: 'claude', provider: 'claude', protocol: 'claude/stream-json', available: true, detail: 'fixture', reviewedVersion: 'fixture', interactiveRequests: false, toolMode: 'Read,Glob,Grep only' }]); assert.equal(profiles[0].interactiveRequests, false) })
+test('large item rendering is explicitly truncated', () => { let s = applyEvent(empty(), event(1, { text: 'a'.repeat(200000) })); s = applyEvent(s, event(2, { text: 'b'.repeat(200000) })); assert.equal(s.items[0].text.length, 262144); assert.equal(s.items[0].truncated, true) })
+test('duplicate question IDs are rejected', () => { const q = { id: 'q', text: 'Q', options: [], multiple: false, freeText: true }; assert.throws(() => applyEvent(empty(), event(1, { kind: 'input.request', itemId: 'q_1', request: { ...request, kind: 'question', questions: [q, q] } }))) })
+test('renderer retains only a bounded replay fingerprint window', () => { let s = empty(); for (let seq = 1; seq <= 100; seq++) s = applyEvent(s, event(seq)); assert.equal(Object.keys(s.recent).length, 64) })

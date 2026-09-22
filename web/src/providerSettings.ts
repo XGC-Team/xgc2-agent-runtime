@@ -55,7 +55,7 @@ export function decodeNativeSettings(value: unknown): AgentSettings {
   const settings = record(value)
   const providers = unique(array(settings.providers, value => {
     const row = record(value), login = record(row.login)
-    if (!PROVIDERS.includes(row.provider as AgentProvider)) throw new Error('Unknown native provider.')
+    if (!PROVIDERS.includes(row.provider as AgentProvider)) throw new Error('Unknown provider.')
     if (!['unknown', 'authenticated', 'unauthenticated'].includes(String(login.status))) throw new Error('Unknown provider login state.')
     const models = unique(array(row.models, value => {
       const model = record(value)

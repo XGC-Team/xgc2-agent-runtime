@@ -88,7 +88,7 @@ export function createAgentClient(options: AgentClientOptions) {
         const page = await getNativeSessionPage(signal,{after})
         sessions.push(...page.sessions)
         after = page.nextCursor
-        if (after && seen.has(after)) throw new Error('Native conversation pagination repeated a cursor.')
+        if (after && seen.has(after)) throw new Error('Conversation pagination repeated a cursor.')
         if (after) seen.add(after)
       } while (after)
       return sessions
@@ -106,7 +106,7 @@ export function createAgentClient(options: AgentClientOptions) {
       }
       const expectedOptions = scope.options
       if (['model', 'effort', 'permission'].some(key => session.scope.options?.[key as keyof AgentTurnOptions] !== expectedOptions?.[key as keyof AgentTurnOptions])) {
-        throw new Error('Native session options do not match the request.')
+        throw new Error('Session options do not match the request.')
       }
       return session
     }, post(scope, key)),

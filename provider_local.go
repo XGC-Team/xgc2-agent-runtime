@@ -18,9 +18,9 @@ func inspectLocalLogin(ctx context.Context, p Profile, result *ProviderSetting) 
 		}
 		value := strings.ToLower(string(output))
 		if strings.Contains(value, "not authenticated") || strings.Contains(value, "not logged in") {
-			result.Login = LoginStatus{"unauthenticated", "Log in using the native Grok client."}
+			result.Login = LoginStatus{"unauthenticated", "Log in using the Grok client."}
 		} else if strings.Contains(value, "you are logged in") {
-			result.Login = LoginStatus{"authenticated", "Using the native Grok login."}
+			result.Login = LoginStatus{"authenticated", "Using the Grok login."}
 		}
 		if len(result.Models) == 0 {
 			for _, line := range strings.Split(string(output), "\n") {
@@ -61,9 +61,9 @@ func inspectLocalLogin(ctx context.Context, p Profile, result *ProviderSetting) 
 		}
 		if known {
 			if email == "" || strings.Contains(strings.ToLower(email), "not logged in") || strings.Contains(strings.ToLower(email), "login required") {
-				result.Login = LoginStatus{"unauthenticated", "Log in using the native Cursor client."}
+				result.Login = LoginStatus{"unauthenticated", "Log in using the Cursor client."}
 			} else {
-				result.Login = LoginStatus{"authenticated", "Using the native Cursor login."}
+				result.Login = LoginStatus{"authenticated", "Using the Cursor login."}
 			}
 		}
 	}
@@ -79,11 +79,11 @@ func grokPermissionArgs(permission string) ([]string, error) {
 	case "full-access":
 		return []string{"--no-auto-update", "agent", "--always-approve", "stdio"}, nil
 	default:
-		return nil, errors.New("unsupported native Grok permission")
+		return nil, errors.New("unsupported Grok permission")
 	}
 }
 func grokPermissions() []Permission {
-	return []Permission{{"approval-required", "Ask for approval", "Use Grok's native default permission mode."}, {"auto-accept-edits", "Accept edits", "Use Grok's native acceptEdits permission mode."}, {"full-access", "Full access", "Use Grok's explicit always-approve agent mode."}}
+	return []Permission{{"approval-required", "Ask for approval", "Use Grok's default permission mode."}, {"auto-accept-edits", "Accept edits", "Use Grok's acceptEdits permission mode."}, {"full-access", "Full access", "Use Grok's explicit always-approve agent mode."}}
 }
 
 func cursorPermissionArgs(permission string) ([]string, error) {
@@ -95,7 +95,7 @@ func cursorPermissionArgs(permission string) ([]string, error) {
 	case "auto":
 		return []string{"--auto-review", "acp"}, nil
 	default:
-		return nil, errors.New("unsupported native Cursor permission")
+		return nil, errors.New("unsupported Cursor permission")
 	}
 }
 func acpLaunchPermission(provider, permission string) string {

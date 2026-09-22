@@ -23,7 +23,7 @@ test('submitted is not approval or completion', () => { const s = applyEvent(req
 test('native expiry removes approval buttons', () => { const s = applyEvent(requested(), event(2, { kind: 'input.resolved', itemId: 'q_1', status: 'expired' })); assert.deepEqual(s.pending, {}) })
 test('host restart makes old requests inactive', () => { const s = applyEvent(requested(), event(2, { kind: 'session.state', status: 'disconnected' })); assert.deepEqual(s.pending, {}); assert.equal(s.worker, 'disconnected') })
 test('session state diagnostic text is not an operator notice', () => {
-  const s = applyEvent(empty(), event(1, { kind: 'session.state', status: 'starting', text: 'Explicit native resume; no prior prompt is replayed.' }))
+  const s = applyEvent(empty(), event(1, { kind: 'session.state', status: 'starting', text: 'Resumed the existing session. No prior prompt is replayed.' }))
   assert.deepEqual(s.notices, [])
   assert.equal(s.worker, 'starting')
 })

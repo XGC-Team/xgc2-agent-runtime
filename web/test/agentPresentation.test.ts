@@ -100,7 +100,7 @@ describe('native protocol to migrated T3 presentation', () => {
   })
   it('does not invent Session notice work rows from journal notices or session resume copy', () => {
     const input = state(); input.worker = 'ready'; input.activeTurnId = ''; input.lastTurnStatus = 'completed'
-    input.notices = ['Explicit native resume; no prior prompt is replayed.', 'Host restarted. Prior turn outcome may be unknown; prompts will not be resent.']
+    input.notices = ['Resumed the existing session. No prior prompt is replayed.', 'Host restarted. Prior turn outcome may be unknown; prompts will not be resent.']
     expect(nativeConversationModel(input).items).toEqual([])
     expect(nativeConversationModel(input).items.some((entry) => entry.kind === 'work' && 'title' in entry && entry.title === 'Session notice')).toBe(false)
   })

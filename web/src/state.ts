@@ -99,31 +99,31 @@ function hiddenNativeField(key: string) {
   return ['auth','authorization','authentication','accesstoken','refreshtoken','idtoken','apikey','password','secret','clientsecret','cookie','setcookie','env','environment','headers','meta','proto','constructor','prototype'].includes(key.toLowerCase().replace(/[-_.]/g, ''))
 }
 function nativeJson(value: unknown, budget = { nodes: 0 }, depth = 0): AgentJson {
-  if (++budget.nodes > 1024 || depth > 6) throw new Error('原生工具数据超过结构限制。')
+  if (++budget.nodes > 1024 || depth > 6) throw new Error('工具数据超过结构限制。')
   if (value === null || typeof value === 'boolean') return value
   if (typeof value === 'string') return string(value, 16 * 1024)
-  if (typeof value === 'number') { if (!Number.isFinite(value)) throw new Error('原生工具数值无效。'); return value }
+  if (typeof value === 'number') { if (!Number.isFinite(value)) throw new Error('工具数值无效。'); return value }
   if (Array.isArray(value)) return list(value, (entry) => nativeJson(entry, budget, depth + 1), 64)
   const source = record(value), entries = Object.entries(source)
-  if (entries.length > 64) throw new Error('原生工具数据超过结构限制。')
+  if (entries.length > 64) throw new Error('工具数据超过结构限制。')
   return Object.fromEntries(entries.map(([key, entry]) => {
-    if (key.length > 256 || hiddenNativeField(key)) throw new Error('原生工具数据含禁止的配置字段。')
+    if (key.length > 256 || hiddenNativeField(key)) throw new Error('工具数据含禁止的配置字段。')
     return [key, nativeJson(entry, budget, depth + 1)]
   }))
 }
 function nativeDetails(value: unknown): AgentItemDetails {
   const d = record(value)
-  if (JSON.stringify(d).length > 2 * 1024 * 1024) throw new Error('原生工具详情过长。')
+  if (JSON.stringify(d).length > 2 * 1024 * 1024) throw new Error('工具详情过长。')
   const truncated = d.truncated === undefined ? {} : { truncated: boolean(d.truncated) }
   switch (d.type) {
     case 'userMessage': {
-      if (Object.keys(d).some(key => !['type', 'providerOptions'].includes(key))) throw new Error('原生用户消息详情字段无效。')
+      if (Object.keys(d).some(key => !['type', 'providerOptions'].includes(key))) throw new Error('用户消息详情字段无效。')
       const providerOptions = decodeNativeTurnOptions(d.providerOptions)
-      if (!Object.keys(providerOptions).length) throw new Error('原生用户消息选项缺失。')
+      if (!Object.keys(providerOptions).length) throw new Error('用户消息选项缺失。')
       return { type: d.type, providerOptions }
     }
     case 'agentMessage': {
-      if (d.phase !== undefined && d.phase !== 'commentary' && d.phase !== 'final_answer') throw new Error('原生消息阶段无效。')
+      if (d.phase !== undefined && d.phase !== 'commentary' && d.phase !== 'final_answer') throw new Error('消息阶段无效。')
       return { type: d.type, ...truncated, ...(d.phase ? { phase: d.phase as 'commentary' | 'final_answer' } : {}) }
     }
     case 'commandExecution':
@@ -132,13 +132,13 @@ function nativeDetails(value: unknown): AgentItemDetails {
         ...(d.durationMs === undefined ? {} : { durationMs: nativeNumber(d.durationMs) }),
         ...(d.commandActions === undefined ? {} : { commandActions: list(d.commandActions, (entry) => {
           const action = record(entry)
-          if (!['read','listFiles','search','unknown'].includes(String(action.type))) throw new Error('原生命令操作类型无效。')
+          if (!['read','listFiles','search','unknown'].includes(String(action.type))) throw new Error('命令操作类型无效。')
           return { type: action.type as AgentCommandAction['type'], command: string(action.command, 16 * 1024), ...optionalText(action, 'name', 4096), ...optionalText(action, 'path', 4096), ...optionalText(action, 'query', 4096) }
         }, 64) }) }
     case 'fileChange':
       return { type: d.type, ...truncated, changes: list(d.changes, (entry) => {
         const change = record(entry), kind = record(change.kind)
-        if (!['add','delete','update'].includes(String(kind.type))) throw new Error('原生文件变更类型无效。')
+        if (!['add','delete','update'].includes(String(kind.type))) throw new Error('文件变更类型无效。')
         return { path: string(change.path, 4096), diff: string(change.diff, 64 * 1024), kind: { type: kind.type as AgentFileChange['kind']['type'], ...optionalText(kind, 'movePath', 4096) } }
       }, 64) }
     case 'mcpToolCall': {
@@ -161,7 +161,7 @@ function nativeDetails(value: unknown): AgentItemDetails {
             if (imageBytesLeft < 0) throw new Error('Tool images exceed the display limit.')
             return { type: 'image', mimeType: block.mimeType as 'image/jpeg' | 'image/png', data, width, height }
           }
-          if (block.type !== 'resource_link') throw new Error('原生工具内容类型不支持。')
+          if (block.type !== 'resource_link') throw new Error('工具内容类型不支持。')
           return { type: block.type, uri: string(block.uri, 4096), ...optionalText(block, 'name', 4096), ...optionalText(block, 'mimeType', 4096), ...optionalText(block, 'description', 4096) }
         }, 64), ...(result.structuredContent === undefined ? {} : { structuredContent: nativeJson(result.structuredContent) }) } }) }
     }
@@ -174,7 +174,7 @@ function nativeDetails(value: unknown): AgentItemDetails {
     }
     case 'reasoningSummary':
       return { type: d.type, ...truncated, ...(d.summaryIndex === undefined ? {} : { summaryIndex: nativeNumber(d.summaryIndex) }) }
-    default: throw new Error('未知原生结构化条目类型。')
+    default: throw new Error('未知结构化条目类型。')
   }
 }
 function nativeRequestDetails(value: unknown): AgentRequestDetails {
@@ -196,17 +196,17 @@ function nativeDecision(value: unknown): AgentDecision {
 
 function options(value: unknown): DecisionOption[] {
   const result = list(value, (entry) => { const o = record(entry); return { id: string(o.id, 8192), label: string(o.label, 8192), kind: string(o.kind, 32), ...optionalText(o, 'description') } }, 32)
-  if (result.some(({ id }) => !id) || new Set(result.map(({ id }) => id)).size !== result.length) throw new Error('原生请求选项标识重复或缺失。')
+  if (result.some(({ id }) => !id) || new Set(result.map(({ id }) => id)).size !== result.length) throw new Error('请求选项标识重复或缺失。')
   return result
 }
 function request(value: unknown): AgentRequest {
   const r = record(value)
-  if (!['permission', 'question', 'plan'].includes(String(r.kind))) throw new Error('未知原生请求类型。')
+  if (!['permission', 'question', 'plan'].includes(String(r.kind))) throw new Error('未知请求类型。')
   const questions = list(r.questions, (entry) => {
     const q = record(entry)
     return { id: string(q.id, 256), text: string(q.text, 8192), options: options(q.options), multiple: boolean(q.multiple), freeText: boolean(q.freeText), ...optionalText(q, 'header', 256) }
   }, 16)
-  if (questions.some(({ id }) => !id) || new Set(questions.map(({ id }) => id)).size !== questions.length) throw new Error('原生问题标识重复或缺失。')
+  if (questions.some(({ id }) => !id) || new Set(questions.map(({ id }) => id)).size !== questions.length) throw new Error('问题标识重复或缺失。')
   return { id: safeId(r.id), kind: r.kind as AgentRequest['kind'], title: string(r.title, 4096), ...(r.text === undefined ? {} : { text: string(r.text) }), options: options(r.options), questions,
     ...optionalText(r, 'sourceMethod', 512), ...optionalText(r, 'providerThreadId', 512), ...optionalText(r, 'providerTurnId', 512), ...optionalText(r, 'providerItemId', 512),
     ...(r.createdAt === undefined ? {} : { createdAt: nativeTimestamp(r.createdAt) }), ...(r.details === undefined ? {} : { details: nativeRequestDetails(r.details) }) }
@@ -226,7 +226,7 @@ export function decodeNativeTurnOptions(value: unknown): AgentTurnOptions {
 }
 function nativeMetadata(value: unknown): AgentConversationMetadata {
   const s = record(value), metadataRevision = integer(s.metadataRevision), title = string(s.title, 640)
-  if (metadataRevision < 1 || [...title].length > 160 || title.trim() !== title || /\p{Cc}/u.test(title)) throw new Error('Native conversation metadata is invalid.')
+  if (metadataRevision < 1 || [...title].length > 160 || title.trim() !== title || /\p{Cc}/u.test(title)) throw new Error('Conversation metadata is invalid.')
   return { title, archived: boolean(s.archived), metadataRevision }
 }
 export function decodeSession(value: unknown): AgentSession {
@@ -235,8 +235,8 @@ export function decodeSession(value: unknown): AgentSession {
   const context = record(scope.context), workspace = record(scope.workspace)
   const revision = string(workspace.revision, 256)
   if (!revision || /[\0\r\n]/.test(revision)) throw new Error('缺少已确认的工作区版本。')
-  if (boolean(scope.accessConfirmed) !== true) throw new Error('原生会话缺少明确本机授权。')
-  const createdAt = string(s.createdAt, 64); if (!Number.isFinite(Date.parse(createdAt))) throw new Error('原生会话时间无效。')
+  if (boolean(scope.accessConfirmed) !== true) throw new Error('会话缺少明确本机授权。')
+  const createdAt = string(s.createdAt, 64); if (!Number.isFinite(Date.parse(createdAt))) throw new Error('会话时间无效。')
   return { schemaVersion: AGENT_RUNTIME_SCHEMA, id: safeId(s.id), provider: provider(s.provider), state: worker(s.state), createdAt,
     ...nativeMetadata(s),
     ...(s.runtimeId === undefined ? {} : { runtimeId: safeId(s.runtimeId) }),
@@ -251,19 +251,19 @@ export function decodeProfiles(value: unknown): AgentProfile[] {
 export function decodeEvent(value: unknown, sessionId: string, expectedProvider: AgentProvider): AgentEvent {
   const e = record(value)
   if (e.schemaVersion !== AGENT_RUNTIME_SCHEMA || e.sessionId !== sessionId || e.provider !== expectedProvider) throw new Error('事件身份链不匹配，已停止显示。')
-  if (!kinds.includes(e.kind as AgentEvent['kind'])) throw new Error('未知原生事件版本，已停止显示。')
+  if (!kinds.includes(e.kind as AgentEvent['kind'])) throw new Error('未知事件版本，已停止显示。')
   const result: AgentEvent = { schemaVersion: AGENT_RUNTIME_SCHEMA, sessionId, provider: expectedProvider, kind: e.kind as AgentEvent['kind'], seq: integer(e.seq) }
-  if (result.seq === 0) throw new Error('原生事件序号必须从 1 开始。')
+  if (result.seq === 0) throw new Error('事件序号必须从 1 开始。')
   for (const key of ['turnId', 'itemId', 'text', 'title', 'status', 'sourceMethod', 'providerSessionId', 'providerThreadId', 'providerTurnId'] as const) {
     if (e[key] !== undefined) result[key] = string(e[key], key === 'text' ? 4 * 1024 * 1024 : key === 'title' ? 4096 : 512)
   }
   if (e.createdAt !== undefined) result.createdAt = nativeTimestamp(e.createdAt)
   if (e.runtimeId !== undefined) result.runtimeId = safeId(e.runtimeId)
-  if (result.kind === 'session.runtime' && !result.runtimeId) throw new Error('Native runtime identity is required.')
+  if (result.kind === 'session.runtime' && !result.runtimeId) throw new Error('Runtime identity is required.')
   if (result.kind === 'prompt.queue') result.queue = decodePromptQueue(e.queue)
   if (result.kind === 'session.metadata') result.metadata = nativeMetadata(e.metadata)
   if (e.decision !== undefined) {
-    if (e.kind !== 'input.submitted' && e.kind !== 'input.resolved') throw new Error('Native decision requires a response event.')
+    if (e.kind !== 'input.submitted' && e.kind !== 'input.resolved') throw new Error('A decision requires a response event.')
     result.decision = nativeDecision(e.decision)
   }
   if (e.details !== undefined) {
@@ -275,17 +275,17 @@ export function decodeEvent(value: unknown, sessionId: string, expectedProvider:
     result.details = nativeDetails(legacyPrompt ? { type: 'userMessage', ...details } : details)
   }
   if (e.role !== undefined) { if (!roles.includes(e.role as Role)) throw new Error('未知消息角色。'); result.role = e.role as Role }
-  if (result.kind.startsWith('item.') && (!result.turnId || !result.itemId || !result.role)) throw new Error('原生消息缺少轮次、条目或角色。')
+  if (result.kind.startsWith('item.') && (!result.turnId || !result.itemId || !result.role)) throw new Error('消息缺少轮次、条目或角色。')
   if (result.details) {
     const expectedRole = result.details.type === 'userMessage' ? 'user' : result.details.type === 'agentMessage' ? 'assistant' : result.details.type === 'reasoningSummary' ? 'activity' : 'tool'
-    if (!result.kind.startsWith('item.') || result.role !== expectedRole) throw new Error('原生结构化条目与消息角色不匹配。')
-    if (result.details.type === 'userMessage' && (result.kind !== 'item.snapshot' || result.itemId !== 'user' || result.status !== 'submitted')) throw new Error('原生用户消息回执无效。')
+    if (!result.kind.startsWith('item.') || result.role !== expectedRole) throw new Error('结构化条目与消息角色不匹配。')
+    if (result.details.type === 'userMessage' && (result.kind !== 'item.snapshot' || result.itemId !== 'user' || result.status !== 'submitted')) throw new Error('用户消息回执无效。')
   }
   if (result.kind === 'session.state') worker(result.status)
-  if (result.kind === 'session.identity' && (!result.providerSessionId || result.providerSessionId.length > 512)) throw new Error('原生会话身份缺失。')
-  if (result.kind.startsWith('input.') && (!result.itemId || !result.turnId)) throw new Error('原生请求身份缺失。')
-  if (result.kind === 'input.request') { result.request = request(e.request); if (result.request.id !== result.itemId) throw new Error('原生审批标识不匹配。') }
-  if (result.kind === 'turn.end' && (!result.turnId || !['completed', 'failed', 'cancelled', 'unknown', 'incomplete', 'refused', 'blocked'].includes(result.status ?? ''))) throw new Error('原生轮次终态无效。')
+  if (result.kind === 'session.identity' && (!result.providerSessionId || result.providerSessionId.length > 512)) throw new Error('会话身份缺失。')
+  if (result.kind.startsWith('input.') && (!result.itemId || !result.turnId)) throw new Error('请求身份缺失。')
+  if (result.kind === 'input.request') { result.request = request(e.request); if (result.request.id !== result.itemId) throw new Error('审批标识不匹配。') }
+  if (result.kind === 'turn.end' && (!result.turnId || !['completed', 'failed', 'cancelled', 'unknown', 'incomplete', 'refused', 'blocked'].includes(result.status ?? ''))) throw new Error('轮次终态无效。')
   return result
 }
 export function emptyStream(sessionId: string, source: AgentProvider): StreamState {
@@ -299,16 +299,16 @@ export function applyEvent(state: StreamState, raw: unknown): StreamState {
     if (state.recent[e.seq] && state.recent[e.seq] !== fingerprint) throw new Error('同一事件序号出现不同内容。')
     return state
   }
-  if (e.seq !== state.cursor + 1) throw new Error('原生事件流存在缺口；请重新读取会话，不要重新提交任务。')
+  if (e.seq !== state.cursor + 1) throw new Error('事件流存在缺口；请重新读取会话，不要重新提交任务。')
   const recent = { ...state.recent, [e.seq]: fingerprint }; delete recent[e.seq - 64]
   const next = { ...state, cursor: e.seq, recent }
   if (e.runtimeId) {
-    if (state.runtimeId && e.kind !== 'session.runtime' && e.runtimeId !== state.runtimeId) throw new Error('Native runtime identity changed without a new runtime event.')
+    if (state.runtimeId && e.kind !== 'session.runtime' && e.runtimeId !== state.runtimeId) throw new Error('The runtime identity changed without a new runtime event.')
     next.runtimeId = e.runtimeId
   }
   switch (e.kind) {
     case 'session.metadata':
-      if (state.metadata && e.metadata!.metadataRevision <= state.metadata.metadataRevision) throw new Error('Native conversation metadata revision did not advance.')
+      if (state.metadata && e.metadata!.metadataRevision <= state.metadata.metadataRevision) throw new Error('Conversation metadata revision did not advance.')
       next.metadata = e.metadata
       break
     case 'session.runtime':
@@ -317,7 +317,7 @@ export function applyEvent(state: StreamState, raw: unknown): StreamState {
       next.activeTurnId = ''
       break
     case 'session.identity':
-      if (state.providerSessionId && state.providerSessionId !== e.providerSessionId) throw new Error('原生会话身份发生变化。')
+      if (state.providerSessionId && state.providerSessionId !== e.providerSessionId) throw new Error('会话身份发生变化。')
       next.providerSessionId = e.providerSessionId!; break
     case 'session.state':
       next.worker = worker(e.status)
@@ -335,9 +335,9 @@ export function applyEvent(state: StreamState, raw: unknown): StreamState {
       const index = state.items.findIndex((item) => item.key === key)
       if (index < 0 && state.items.length >= 2048) throw new Error('会话显示条目已达上限；原始事件仍保留在本地日志。')
       const existing = state.items[index]
-      if (existing && existing.role !== e.role) throw new Error('同一原生条目的角色发生变化。')
-      for (const key of ['providerThreadId', 'providerTurnId'] as const) { if (existing?.[key] && e[key] && existing[key] !== e[key]) throw new Error('同一条目的原生身份发生变化。') }
-      if (existing?.details && e.details && existing.details.type !== e.details.type) throw new Error('同一原生条目的结构类型发生变化。')
+      if (existing && existing.role !== e.role) throw new Error('同一条目的角色发生变化。')
+      for (const key of ['providerThreadId', 'providerTurnId'] as const) { if (existing?.[key] && e[key] && existing[key] !== e[key]) throw new Error('同一条目的身份发生变化。') }
+      if (existing?.details && e.details && existing.details.type !== e.details.type) throw new Error('同一条目的结构类型发生变化。')
       const content = e.kind === 'item.delta' ? (existing?.text ?? '') + (e.text ?? '') : e.kind === 'item.snapshot' ? e.text ?? '' : existing?.text ?? ''
       const item: AgentItem = { key, turnId: e.turnId!, id: e.itemId!, role: e.role!, text: content.slice(0, ITEM_LIMIT), title: e.title || existing?.title || '', status: e.status || existing?.status || 'running', truncated: content.length > ITEM_LIMIT || (e.kind !== 'item.snapshot' && Boolean(existing?.truncated)),
         ...(existing?.turnStatus ? { turnStatus: existing.turnStatus } : {}),

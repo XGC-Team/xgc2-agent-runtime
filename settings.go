@@ -77,12 +77,12 @@ type settingsState struct {
 // Existing NewBroker callers remain valid and retain immutable supplied profiles.
 func ConfigureBroker(b *Broker, options BrokerOptions) error {
 	if !filepath.IsAbs(options.SettingsFile) {
-		return errors.New("native settings require an absolute shared configuration path")
+		return errors.New("settings require an absolute shared configuration path")
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.settings != nil {
-		return errors.New("native settings are already configured")
+		return errors.New("settings are already configured")
 	}
 	initial := []Profile{}
 	for _, p := range b.profiles {
@@ -142,11 +142,11 @@ func emptySetting(p Profile) ProviderSetting {
 			available = info.Mode().IsRegular() && info.Mode()&0111 != 0
 		}
 	}
-	detail := "Refresh to inspect the installed CLI and its native login."
+	detail := "Refresh to inspect the installed CLI and its login."
 	if !available {
-		detail = "Native CLI not found. Install and log in using the provider's own client."
+		detail = "CLI not found. Install it and log in with the provider's own client."
 	}
-	return ProviderSetting{ID: p.ID, Provider: p.Provider, Enabled: !p.Disabled, BinaryPath: path, Available: available, Version: p.ReviewedVersion, Login: LoginStatus{"unknown", "Native login has not been checked."}, Detail: detail, Defaults: p.Defaults, Models: []Model{}, Permissions: []Permission{}}
+	return ProviderSetting{ID: p.ID, Provider: p.Provider, Enabled: !p.Disabled, BinaryPath: path, Available: available, Version: p.ReviewedVersion, Login: LoginStatus{"unknown", "Login has not been checked."}, Detail: detail, Defaults: p.Defaults, Models: []Model{}, Permissions: []Permission{}}
 }
 func (s *settingsState) read() ([]Profile, string, error) {
 	info, err := os.Lstat(s.file)
@@ -155,7 +155,7 @@ func (s *settingsState) read() ([]Profile, string, error) {
 		return append([]Profile{}, s.initial...), hash(string(data)), nil
 	}
 	if err != nil || !info.Mode().IsRegular() || info.Size() > 64<<10 {
-		return nil, "", errors.New("invalid native settings file")
+		return nil, "", errors.New("invalid settings file")
 	}
 	data, err := os.ReadFile(s.file)
 	if err != nil {
@@ -226,7 +226,7 @@ func (b *Broker) Settings() (Settings, error) {
 }
 func resolveProfile(input ProviderUpdate) (Profile, error) {
 	if !safeID.MatchString(input.ID) {
-		return Profile{}, errors.New("invalid native provider ID")
+		return Profile{}, errors.New("invalid provider ID")
 	}
 	if _, err := commandArgs(input.Provider); err != nil {
 		return Profile{}, err
@@ -235,18 +235,18 @@ func resolveProfile(input ProviderUpdate) (Profile, error) {
 	command := strings.TrimSpace(input.BinaryPath)
 
 	if strings.ContainsAny(command, "\x00\r\n") {
-		return p, errors.New("invalid native binary path")
+		return p, errors.New("invalid binary path")
 	}
 	path, err := lookupProvider(input.Provider, command)
 	if err != nil {
 		if p.Disabled && input.Defaults == (AgentOptions{}) {
 			return p, nil
 		}
-		return p, errors.New("native executable not found")
+		return p, errors.New("executable not found")
 	}
 	path, err = filepath.EvalSymlinks(path)
 	if err != nil {
-		return p, errors.New("native executable cannot be resolved")
+		return p, errors.New("executable cannot be resolved")
 	}
 	path, err = filepath.Abs(path)
 	if err != nil {
@@ -259,7 +259,7 @@ func resolveProfile(input ProviderUpdate) (Profile, error) {
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil || !info.Mode().IsRegular() || info.Mode()&0111 == 0 {
-		return p, errors.New("native executable must be a regular executable file")
+		return p, errors.New("executable must be a regular executable file")
 	}
 	h := sha256.New()
 	if _, err = io.Copy(h, f); err != nil {
@@ -268,7 +268,7 @@ func resolveProfile(input ProviderUpdate) (Profile, error) {
 	p.Executable = path
 	p.SHA256 = hex.EncodeToString(h.Sum(nil))
 	p.BillingReviewed = true
-	p.ReviewedVersion = "Unverified native CLI"
+	p.ReviewedVersion = "Unverified CLI"
 	return p, nil
 }
 func (b *Broker) RefreshSettings(ctx context.Context, id string) (Settings, error) {
@@ -362,7 +362,7 @@ func (b *Broker) UpdateSettings(ctx context.Context, input SettingsUpdate) (Sett
 	if profile.Executable != "" && preserved == nil {
 		profile.ReviewedVersion = inventory.Version
 		if profile.ReviewedVersion == "" {
-			return Settings{}, errors.New("native CLI version could not be verified")
+			return Settings{}, errors.New("CLI version could not be verified")
 		}
 	}
 	if err = validateOptions(input.Provider.Defaults, inventory); err != nil && preserved == nil {
@@ -373,7 +373,7 @@ func (b *Broker) UpdateSettings(ctx context.Context, input SettingsUpdate) (Sett
 	}
 	lockPath := s.file + ".lock"
 	if info, e := os.Lstat(lockPath); e == nil && !info.Mode().IsRegular() {
-		return Settings{}, errors.New("invalid native settings lock")
+		return Settings{}, errors.New("invalid settings lock")
 	}
 	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
@@ -408,7 +408,7 @@ func (b *Broker) UpdateSettings(ctx context.Context, input SettingsUpdate) (Sett
 	if !found {
 		if len(profiles) >= 16 {
 			s.mu.Unlock()
-			return Settings{}, errors.New("native provider limit reached")
+			return Settings{}, errors.New("provider limit reached")
 		}
 		profiles = append(profiles, profile)
 	}
@@ -452,7 +452,7 @@ func (b *Broker) UpdateSettings(ctx context.Context, input SettingsUpdate) (Sett
 }
 func validateOptions(o AgentOptions, p ProviderSetting) error {
 	if o.Model == "" && o.Effort != "" {
-		return errors.New("select a native model before its reasoning effort")
+		return errors.New("select a model before its reasoning effort")
 	}
 	if o.Model != "" {
 		found := false
@@ -472,7 +472,7 @@ func validateOptions(o AgentOptions, p ProviderSetting) error {
 			}
 		}
 		if !found {
-			return errors.New("model is not advertised by this native provider; refresh provider capabilities")
+			return errors.New("model is not advertised by this provider; refresh provider capabilities")
 		}
 	}
 	if o.Permission != "" {
@@ -481,7 +481,7 @@ func validateOptions(o AgentOptions, p ProviderSetting) error {
 			found = found || v.ID == o.Permission
 		}
 		if !found {
-			return errors.New("permission mode is not supported by this native integration")
+			return errors.New("permission mode is not supported by this integration")
 		}
 	}
 	return nil
@@ -510,7 +510,7 @@ func (b *Broker) selection(profile Profile, override AgentOptions) (AgentOptions
 		if selected == (AgentOptions{}) {
 			return selected, nil
 		}
-		return selected, errors.New("native selections require configured provider capabilities")
+		return selected, errors.New("selections require configured provider capabilities")
 	}
 	b.settings.mu.Lock()
 	inventory, ok := b.settings.inventory[profile.Executable+":"+profile.SHA256]
@@ -519,7 +519,7 @@ func (b *Broker) selection(profile Profile, override AgentOptions) (AgentOptions
 		if selected == (AgentOptions{}) {
 			return selected, nil
 		}
-		return selected, errors.New("refresh native provider capabilities before selecting model or permissions")
+		return selected, errors.New("refresh provider capabilities before selecting model or permissions")
 	}
 	// Explicit per-session defaults win over native defaults. Defaults are resolved
 	// once into the private session snapshot, not reread on each existing turn.
@@ -561,7 +561,7 @@ type limitedOutput struct {
 
 func (b *limitedOutput) Write(p []byte) (int, error) {
 	if len(b.data)+len(p) > b.limit {
-		return 0, errors.New("native inspection output exceeded limit")
+		return 0, errors.New("inspection output exceeded limit")
 	}
 	b.data = append(b.data, p...)
 	return len(p), nil
@@ -575,19 +575,19 @@ func inspectProvider(ctx context.Context, p Profile) ProviderSetting {
 	}
 	if err := checkExecutable(p); err != nil {
 		result.Available = false
-		result.Detail = "Native executable changed; review its binary path again."
+		result.Detail = "The executable changed; review its binary path again."
 		return result
 	}
 	data, err := cliOutput(ctx, p, "--version")
 	if err != nil {
 		result.Version = ""
-		result.Detail = "Native CLI version check failed."
+		result.Detail = "CLI version check failed."
 		return result
 	}
 	version := strings.TrimSpace(string(data))
 	if len(version) > 256 || strings.ContainsAny(version, "\x00\r\n") {
 		result.Version = ""
-		result.Detail = "Native CLI returned an unsupported version response."
+		result.Detail = "The CLI returned an unsupported version response."
 		return result
 	}
 	result.Version = version
@@ -600,7 +600,7 @@ func inspectProvider(ctx context.Context, p Profile) ProviderSetting {
 			inspectOpenCodeVariants(ctx, p, &result)
 		}
 		if p.Provider == "cursor" && len(result.Permissions) > 0 {
-			modes := []Permission{{"approval-required", "Ask for approval", "Native Cursor agent mode with approval prompts."}, {"auto", "Auto review", "Use native Cursor automatic review."}, {"full-access", "Full access", "Use native Cursor force approval mode."}}
+			modes := []Permission{{"approval-required", "Ask for approval", "Cursor agent mode with approval prompts."}, {"auto", "Auto review", "Use Cursor automatic review."}, {"full-access", "Full access", "Use Cursor force approval mode."}}
 			for _, v := range result.Permissions {
 				if v.ID != "agent" {
 					modes = append(modes, v)
@@ -634,7 +634,7 @@ func inspectCodex(ctx context.Context, p Profile, result *ProviderSetting) {
 	peer := newPeer(child.stdin, child.stdout, false, func(string, map[string]any) {}, func(context.Context, string, map[string]any) (any, error) { return nil, ErrUnavailable })
 	go func() { <-peer.done; _ = child.Wait() }()
 	defer func() { _ = peer.Close(); child.Stop() }()
-	if _, err = peer.Call(ctx, "initialize", map[string]any{"clientInfo": map[string]any{"name": "xgc-native-settings", "version": "0.1.0"}, "capabilities": map[string]any{"experimentalApi": false}}); err != nil {
+	if _, err = peer.Call(ctx, "initialize", map[string]any{"clientInfo": map[string]any{"name": "xgc-agent-runtime", "version": "0.1.0"}, "capabilities": map[string]any{"experimentalApi": false}}); err != nil {
 		result.Detail = "Codex metadata handshake failed."
 		return
 	}
@@ -644,9 +644,9 @@ func inspectCodex(ctx context.Context, p Profile, result *ProviderSetting) {
 	account, err := peer.Call(ctx, "account/read", map[string]any{"refreshToken": false})
 	if err == nil {
 		if text(obj(account["account"]), "type") == "chatgpt" {
-			result.Login = LoginStatus{"authenticated", "Using the native ChatGPT login."}
+			result.Login = LoginStatus{"authenticated", "Using the ChatGPT login."}
 		} else {
-			result.Login = LoginStatus{"unauthenticated", "Native ChatGPT login is required; no API-billing fallback is used."}
+			result.Login = LoginStatus{"unauthenticated", "ChatGPT login is required. API billing is not used."}
 		}
 	}
 	models, err := peer.Call(ctx, "model/list", map[string]any{"limit": 100, "includeHidden": false})

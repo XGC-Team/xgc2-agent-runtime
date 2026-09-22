@@ -39,5 +39,5 @@ func (d *localMCPDriver) PromptWithOptions(ctx context.Context, turn, prompt str
 	if configurable, ok := d.Driver.(optionDriver); ok {
 		return configurable.PromptWithOptions(withLocalMCP(ctx, d.server), turn, prompt, options)
 	}
-	return errors.New("native driver does not support selected options")
+	return errors.New("driver does not support selected options")
 }

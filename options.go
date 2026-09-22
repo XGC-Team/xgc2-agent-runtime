@@ -47,7 +47,7 @@ func codexPermissions(permission string) (approval, sandbox, turnSandbox string,
 	case "full-access":
 		return "never", "danger-full-access", "dangerFullAccess", nil
 	default:
-		return "", "", "", errors.New("unsupported native permission")
+		return "", "", "", errors.New("unsupported permission")
 	}
 }
 func codexThreadOptions(params map[string]any, o AgentOptions) error {

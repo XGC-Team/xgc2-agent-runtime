@@ -72,7 +72,7 @@ export function nativeRequestPresentation(request: AgentRequest & { submitted: b
   }
   // Only the backend's offered choices are actionable. No default session-wide grant.
   return { approval: { requestId: request.id, requestKind: approvalKind(request), createdAt: request.createdAt,
-    submitted: request.submitted, title: request.title === 'Native operation approval' && request.details?.command
+    submitted: request.submitted, title: request.title === 'Operation approval' && request.details?.command
       ? locale === 'zh' ? '执行命令' : 'Run command' : request.title || copy[locale].request,
     detail: approvalDetail(request),
     truncated: request.details?.truncated,

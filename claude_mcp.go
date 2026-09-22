@@ -19,7 +19,7 @@ func checkClaudeLocalMCP(ctx context.Context, profile Profile) error {
 	}
 	help, err := cliOutput(ctx, profile, "--help")
 	if err != nil {
-		return errors.New("cannot verify native Claude support for host-owned MCP configuration")
+		return errors.New("cannot verify Claude support for host-owned MCP configuration")
 	}
 	for _, flag := range []string{"--mcp-config", "--strict-mcp-config", "--input-format"} {
 		if !strings.Contains(string(help), flag) {

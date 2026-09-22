@@ -31,7 +31,7 @@ func (d *rpcDriver) onRequest(ctx context.Context, method string, p map[string]a
 		call := obj(p["toolCall"])
 		r.Title = text(call, "title")
 		if r.Title == "" {
-			r.Title = "Native tool permission"
+			r.Title = "Tool permission"
 		}
 		r.Text = toolContent(arr(call["content"]))
 		for _, v := range arr(p["options"]) {
@@ -45,11 +45,11 @@ func (d *rpcDriver) onRequest(ctx context.Context, method string, p map[string]a
 			return map[string]any{"outcome": map[string]any{"outcome": "cancelled"}}, nil
 		}
 	case "item/commandExecution/requestApproval", "item/fileChange/requestApproval":
-		r.Title = "Native operation approval"
+		r.Title = "Operation approval"
 		r.Details = &RequestDetails{Command: text(p, "command"), Cwd: text(p, "cwd"), Reason: text(p, "reason"), GrantRoot: text(p, "grantRoot")}
 		r.Text = text(p, "command") + "\n" + text(p, "reason")
 		if n := obj(p["networkApprovalContext"]); n != nil {
-			r.Title = "Native network access"
+			r.Title = "Network access"
 			r.Details.Network = &RequestNetwork{Protocol: text(n, "protocol"), Host: text(n, "host")}
 			r.Text = text(n, "protocol") + ": " + text(n, "host") + "\n" + text(p, "reason")
 		}
@@ -69,12 +69,12 @@ func (d *rpcDriver) onRequest(ctx context.Context, method string, p map[string]a
 		}
 	case "item/tool/requestUserInput", "tool/requestUserInput":
 		r.Kind = "question"
-		r.Title = "Native agent needs input"
+		r.Title = "Input needed"
 		for _, v := range arr(p["questions"]) {
 			q := obj(v)
 			secret, _ := q["isSecret"].(bool)
 			if secret {
-				return nil, errors.New("secret input requires the native client")
+				return nil, errors.New("secret input requires the provider client")
 			}
 			question := Question{ID: text(q, "id"), Text: text(q, "question"), Header: text(q, "header"), Options: []Option{}}
 			question.FreeText, _ = q["isOther"].(bool)
@@ -107,8 +107,8 @@ func (d *rpcDriver) onRequest(ctx context.Context, method string, p map[string]a
 		r.Text = text(p, "plan")
 		r.Options = []Option{{ID: "accepted", Label: "Accept plan", Kind: "allow_once"}, {ID: "rejected", Label: "Reject plan", Kind: "reject_once"}}
 	default:
-		d.emit(Event{Kind: "notice", Status: "blocked", Text: "The native agent requested an operation this host cannot handle. The operation was rejected.", SourceMethod: method})
-		return nil, errors.New("unsupported native client request")
+		d.emit(Event{Kind: "notice", Status: "blocked", Text: "The client requested an operation this host cannot handle. The operation was rejected.", SourceMethod: method})
+		return nil, errors.New("unsupported client request")
 	}
 	if err := validateRequest(r); err != nil {
 		return nil, err
@@ -166,45 +166,45 @@ func (d *rpcDriver) onRequest(ctx context.Context, method string, p map[string]a
 func validateRequest(r Request) error {
 	for _, value := range []string{r.AgentThreadID, r.AgentTurnID, r.AgentItemID, r.SourceMethod} {
 		if len(value) > 512 {
-			return errors.New("native request identity exceeds display limits")
+			return errors.New("request identity exceeds display limits")
 		}
 	}
 	if r.Details != nil {
 		if len(r.Details.ToolName) > 256 || len(r.Details.Target) > 8192 || len(r.Details.Preview) > approvalPreviewLimit {
-			return errors.New("native request review details exceed bounds")
+			return errors.New("request review details exceed bounds")
 		}
 		for _, value := range []string{r.Details.Command, r.Details.Cwd, r.Details.Reason, r.Details.GrantRoot} {
 			if len(value) > 8192 {
-				return errors.New("native approval detail exceeds display limits")
+				return errors.New("approval detail exceeds display limits")
 			}
 		}
 		if n := r.Details.Network; n != nil && (len(n.Protocol) > 64 || len(n.Host) > 4096) {
-			return errors.New("native network approval exceeds display limits")
+			return errors.New("network approval exceeds display limits")
 		}
 	}
 	if len(r.Title) > 4096 || len(r.Text) > MaxText || len(r.Options) > 32 || len(r.Questions) > 16 {
-		return errors.New("native request exceeds display limits")
+		return errors.New("request exceeds display limits")
 	}
 	if len(r.Options) == 0 && len(r.Questions) == 0 {
-		return errors.New("native request has no supported response")
+		return errors.New("request has no supported response")
 	}
 	seen := map[string]bool{}
 	for _, o := range r.Options {
 		if o.ID == "" || len(o.ID) > 256 || len(o.Label) > 4096 || seen[o.ID] {
-			return errors.New("invalid native option")
+			return errors.New("invalid option")
 		}
 		seen[o.ID] = true
 	}
 	seen = map[string]bool{}
 	for _, q := range r.Questions {
 		if q.ID == "" || len(q.ID) > 256 || seen[q.ID] || len(q.Text) > 8192 || len(q.Header) > 256 || len(q.Options) > 32 || (!q.FreeText && len(q.Options) == 0) {
-			return errors.New("invalid native question")
+			return errors.New("invalid question")
 		}
 		seen[q.ID] = true
 		options := map[string]bool{}
 		for _, o := range q.Options {
 			if strings.TrimSpace(o.ID) == "" || len(o.ID) > 8192 || len(o.Label) > 8192 || len(o.Description) > 8192 || options[o.ID] {
-				return errors.New("invalid native answer option")
+				return errors.New("invalid answer option")
 			}
 			options[o.ID] = true
 		}

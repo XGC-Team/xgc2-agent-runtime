@@ -21,8 +21,8 @@ const MaxFrame = 4 << 20
 const MaxText = 256 << 10
 
 var ErrConflict = errors.New("request identity conflict")
-var ErrUnavailable = errors.New("native agent unavailable")
-var ErrNotFound = errors.New("native session not found")
+var ErrUnavailable = errors.New("agent runtime unavailable")
+var ErrNotFound = errors.New("session not found")
 var ErrStale = errors.New("request is no longer pending")
 var safeID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,95}$`)
 var digest = regexp.MustCompile(`^[a-f0-9]{64}$`)
@@ -119,7 +119,7 @@ func commandArgs(provider string) ([]string, error) {
 	case "claude":
 		return []string{"--print", "--verbose", "--output-format", "stream-json", "--include-partial-messages", "--tools", "Read,Glob,Grep", "--allowedTools", "Read,Glob,Grep"}, nil
 	default:
-		return nil, errors.New("unsupported native provider")
+		return nil, errors.New("unsupported provider")
 	}
 }
 func checkExecutable(p Profile) error {
@@ -137,7 +137,7 @@ func checkExecutable(p Profile) error {
 	defer f.Close()
 	h := sha256.New()
 	if _, err = io.Copy(h, f); err != nil || hex.EncodeToString(h.Sum(nil)) != p.SHA256 {
-		return errors.New("native executable digest mismatch")
+		return errors.New("executable digest mismatch")
 	}
 	return nil
 }
@@ -303,7 +303,7 @@ type Create struct {
 
 func (c Create) Validate() error {
 	if !safeID.MatchString(c.ProfileID) || !safeID.MatchString(c.Context.Kind) || !safeID.MatchString(c.Context.ID) || !safeID.MatchString(c.Workspace.ID) || c.Workspace.Revision == "" || len(c.Workspace.Revision) > 256 || strings.ContainsAny(c.Workspace.Revision, "\x00\r\n") || !c.AgentAccessConfirmed {
-		return errors.New("a profile, typed context, reviewed workspace revision and native-access consent are required")
+		return errors.New("a profile, typed context, reviewed workspace revision, and access confirmation are required")
 	}
 	return nil
 }
@@ -340,5 +340,5 @@ func arr(v any) []any                        { a, _ := v.([]any); return a }
 func str(v any) string                       { s, _ := v.(string); return s }
 func text(m map[string]any, k string) string { return str(m[k]) }
 func protocolError(code int) error {
-	return fmt.Errorf("native protocol request failed (code %d); inspect the native client, not service credentials", code)
+	return fmt.Errorf("protocol request failed (code %d); inspect the client, not service credentials", code)
 }

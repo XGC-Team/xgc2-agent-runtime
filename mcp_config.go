@@ -100,7 +100,7 @@ func localMCPLaunch(ctx context.Context, provider string, args []string) ([]stri
 	case "cursor", "grok", "opencode":
 		return args, nil, nil // ACP receives a private session-setup header.
 	default:
-		return nil, nil, errors.New("this native provider does not support host-owned MCP bindings")
+		return nil, nil, errors.New("this provider does not support host-owned MCP bindings")
 	}
 }
 func localMCPACPServers(ctx context.Context, initialization map[string]any) ([]any, error) {
@@ -114,7 +114,7 @@ func localMCPACPServers(ctx context.Context, initialization map[string]any) ([]a
 	capabilities, _ := initialization["agentCapabilities"].(map[string]any)
 	transports, _ := capabilities["mcpCapabilities"].(map[string]any)
 	if supported, _ := transports["http"].(bool); !supported {
-		return nil, errors.New("native ACP provider does not advertise HTTP MCP support")
+		return nil, errors.New("ACP provider does not advertise HTTP MCP support")
 	}
 	return []any{map[string]any{"type": "http", "name": server.Name, "url": server.URL, "headers": []any{map[string]string{"name": "Authorization", "value": "Bearer " + server.BearerToken}}}}, nil
 }

@@ -35,13 +35,13 @@ func (s *liveSession) scanEventsLocked(visit func(Event) bool) error {
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 4096), MaxFrame)
 	if !scanner.Scan() {
-		return errors.New("native journal metadata missing")
+		return errors.New("journal metadata missing")
 	}
 	var seq uint64
 	for scanner.Scan() {
 		var event Event
 		if json.Unmarshal(scanner.Bytes(), &event) != nil || event.SchemaVersion != Schema || event.SessionID != s.info.ID || event.Provider != s.info.Provider || event.Seq != seq+1 {
-			return errors.New("native journal event identity or sequence mismatch")
+			return errors.New("journal event identity or sequence mismatch")
 		}
 		seq = event.Seq
 		if !visit(event) {
@@ -49,7 +49,7 @@ func (s *liveSession) scanEventsLocked(visit func(Event) bool) error {
 		}
 	}
 	if scanner.Err() != nil || seq != s.info.LastSeq {
-		return errors.New("native journal could not be read completely")
+		return errors.New("journal could not be read completely")
 	}
 	return nil
 }
@@ -66,7 +66,7 @@ func (s *liveSession) readEventsLocked(after, end uint64) ([]Event, error) {
 		return event.Seq < end
 	})
 	if err == nil && uint64(len(result)) != end-after {
-		err = errors.New("native journal replay range is unavailable")
+		err = errors.New("journal replay range is unavailable")
 	}
 	return result, err
 }

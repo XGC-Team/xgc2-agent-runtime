@@ -102,7 +102,7 @@ func (d *rpcDriver) Open(ctx context.Context, cwd, nativeID string) error {
 	defer cancel()
 	var result map[string]any
 	if d.profile.Provider == "codex" {
-		_, err = d.peer.Call(handshake, "initialize", map[string]any{"clientInfo": map[string]any{"name": "xgc-native-agent", "title": "XGC Native Agent", "version": "0.1.0"}, "capabilities": map[string]any{"experimentalApi": false}})
+		_, err = d.peer.Call(handshake, "initialize", map[string]any{"clientInfo": map[string]any{"name": "xgc-agent-runtime", "title": "XGC", "version": "0.1.0"}, "capabilities": map[string]any{"experimentalApi": false}})
 		if err == nil {
 			err = d.peer.Notify("initialized", map[string]any{})
 		}
@@ -114,7 +114,7 @@ func (d *rpcDriver) Open(ctx context.Context, cwd, nativeID string) error {
 			return e
 		}
 		if text(obj(account["account"]), "type") != "chatgpt" {
-			return errors.New("native ChatGPT login required; Research OS will not fall back to API billing")
+			return errors.New("ChatGPT login required; Research OS will not fall back to API billing")
 		}
 		params := map[string]any{"cwd": cwd}
 		localMCPThreadContext(ctx, params)
@@ -143,7 +143,7 @@ func (d *rpcDriver) Open(ctx context.Context, cwd, nativeID string) error {
 		if d.profile.Provider == "cursor" {
 			capabilities["_meta"] = map[string]any{"parameterizedModelPicker": true}
 		}
-		init, e := d.peer.Call(handshake, "initialize", map[string]any{"protocolVersion": 1, "clientInfo": map[string]any{"name": "xgc-native-agent", "version": "0.1.0"}, "clientCapabilities": capabilities})
+		init, e := d.peer.Call(handshake, "initialize", map[string]any{"protocolVersion": 1, "clientInfo": map[string]any{"name": "xgc-agent-runtime", "version": "0.1.0"}, "clientCapabilities": capabilities})
 		if e != nil {
 			return e
 		}
@@ -152,7 +152,7 @@ func (d *rpcDriver) Open(ctx context.Context, cwd, nativeID string) error {
 		}
 		if d.profile.Provider == "cursor" {
 			if _, err = d.peer.Call(handshake, "authenticate", map[string]any{"methodId": "cursor_login"}); err != nil {
-				return errors.New("existing native Cursor login is unavailable")
+				return errors.New("the existing Cursor login is unavailable")
 			}
 		}
 		if d.profile.Provider == "grok" {
@@ -163,7 +163,7 @@ func (d *rpcDriver) Open(ctx context.Context, cwd, nativeID string) error {
 				}
 			}
 			if !cached {
-				return errors.New("Grok cached native login is unavailable; log in outside Research OS")
+				return errors.New("Grok cached login is unavailable; log in outside Research OS")
 			}
 			if _, err = d.peer.Call(handshake, "authenticate", map[string]any{"methodId": "cached_token", "_meta": map[string]any{"headless": true}}); err != nil {
 				return err
@@ -178,7 +178,7 @@ func (d *rpcDriver) Open(ctx context.Context, cwd, nativeID string) error {
 		if nativeID != "" {
 			load, _ := obj(init["agentCapabilities"])["loadSession"].(bool)
 			if !load {
-				return errors.New("this native ACP version cannot resume a session")
+				return errors.New("this ACP version cannot resume a session")
 			}
 			method = "session/load"
 			params["sessionId"] = nativeID
@@ -192,7 +192,7 @@ func (d *rpcDriver) Open(ctx context.Context, cwd, nativeID string) error {
 		return err
 	}
 	if nativeID == "" || len(nativeID) > 512 {
-		return errors.New("native session identity missing")
+		return errors.New("session identity missing")
 	}
 	d.mu.Lock()
 	d.nativeSession = nativeID
@@ -267,7 +267,7 @@ func (d *rpcDriver) PromptWithOptions(ctx context.Context, turn, prompt string, 
 	}
 	nativeTurn := text(obj(result["turn"]), "id")
 	if nativeTurn == "" {
-		return errors.New("native turn identity missing")
+		return errors.New("turn identity missing")
 	}
 	d.mu.Lock()
 	if d.nativeTurn == "" {
@@ -276,7 +276,7 @@ func (d *rpcDriver) PromptWithOptions(ctx context.Context, turn, prompt string, 
 	same := d.nativeTurn == nativeTurn
 	d.mu.Unlock()
 	if !same {
-		return errors.New("native turn identity mismatch")
+		return errors.New("turn identity mismatch")
 	}
 	for {
 		select {
@@ -302,7 +302,7 @@ func (d *rpcDriver) Cancel(ctx context.Context) error {
 	}
 	if d.profile.Provider == "codex" {
 		if turn == "" {
-			return errors.New("native turn not yet acknowledged; close session to stop the worker")
+			return errors.New("turn not yet acknowledged; close the session to stop the worker")
 		}
 		_, err := d.peer.Call(ctx, "turn/interrupt", map[string]any{"threadId": native, "turnId": turn})
 		return err
@@ -360,7 +360,7 @@ func (d *rpcDriver) onNotification(method string, p map[string]any) {
 	case "cursor/update_todos":
 		d.emit(Event{Kind: "item.snapshot", Role: "plan", ItemID: "cursor-plan", Text: planText(arr(p["todos"])), SourceMethod: method})
 	case "error":
-		d.emit(Event{Kind: "notice", Status: "error", Text: "The native agent reported an error.", SourceMethod: method})
+		d.emit(Event{Kind: "notice", Status: "error", Text: "The client reported an error.", SourceMethod: method})
 	default:
 		// Passive queue/catalog/usage/hook notifications are transport facts,
 		// not operator messages. Unknown requests remain explicitly rejected.
@@ -453,7 +453,7 @@ func (d *rpcDriver) codexEvent(method string, p map[string]any) {
 			e.Text = text(item, "query")
 		case "contextCompaction":
 			e.Role = "activity"
-			e.Title = "Native context compaction"
+			e.Title = "Context compaction"
 		default:
 			return
 		}
@@ -471,7 +471,7 @@ func (d *rpcDriver) codexEvent(method string, p map[string]any) {
 		e.Status = "error"
 		e.Text = nativeErrorMessage(obj(p["error"]))
 		if e.Text == "" {
-			e.Text = "The native agent reported an error."
+			e.Text = "The client reported an error."
 		}
 	case "serverRequest/resolved":
 		return // rpcPeer has already cancelled the matching native request context.
@@ -485,7 +485,7 @@ func (d *rpcDriver) codexEvent(method string, p map[string]any) {
 	}
 	if (e.Kind == "item.delta" || e.Kind == "item.snapshot") && e.ItemID == "" {
 		e.Kind = "notice"
-		e.Text = "Native item omitted its identity; content was not merged."
+		e.Text = "This item omitted its identity; content was not merged."
 	}
 	d.emit(e)
 }
@@ -508,7 +508,7 @@ func (d *rpcDriver) acpEvent(u map[string]any) {
 		}
 		content := obj(u["content"])
 		if text(content, "type") != "text" {
-			d.emit(Event{Kind: "notice", Text: "Native non-text content is not supported by this renderer.", SourceMethod: e.SourceMethod})
+			d.emit(Event{Kind: "notice", Text: "Non-text content is not supported by this renderer.", SourceMethod: e.SourceMethod})
 			return
 		}
 		e.Kind = "item.delta"
@@ -546,7 +546,7 @@ func (d *rpcDriver) acpEvent(u map[string]any) {
 			e.Text = toolContent(arr(c))
 		}
 		if e.ItemID == "" {
-			d.emit(Event{Kind: "notice", Text: "Native tool omitted its identity."})
+			d.emit(Event{Kind: "notice", Text: "This tool omitted its identity."})
 			return
 		}
 	case "plan":
@@ -559,7 +559,7 @@ func (d *rpcDriver) acpEvent(u map[string]any) {
 	case "error":
 		e.Kind = "notice"
 		e.Status = "error"
-		e.Text = "The native agent reported an error."
+		e.Text = "The client reported an error."
 	default:
 		return
 	}
@@ -585,7 +585,7 @@ func toolContent(content []any) string {
 		case "diff":
 			result += text(m, "path") + "\n--- before\n" + text(m, "oldText") + "\n+++ after\n" + text(m, "newText") + "\n"
 		default:
-			result += "[native non-text tool content]\n"
+			result += "[non-text tool content]\n"
 		}
 	}
 	return result

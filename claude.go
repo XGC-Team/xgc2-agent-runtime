@@ -155,7 +155,7 @@ func (d *claudeDecoder) consume(m map[string]any) error {
 	} // No post-result frames can change a finalized turn.
 	if id := text(m, "session_id"); id != "" {
 		if len(id) > 512 {
-			return errors.New("invalid native session ID")
+			return errors.New("invalid session ID")
 		}
 		if d.native != "" && d.native != id {
 			return errors.New("Claude session identity mismatch")
@@ -280,7 +280,7 @@ func (d *claudeDecoder) consume(m map[string]any) error {
 			failure = msg
 		} else if text(m, "subtype") == "success" && m["is_error"] == true {
 			if d.authFailed {
-				failure = "Native Claude login has expired; sign in again with the Claude CLI."
+				failure = "Claude login has expired; sign in again with the Claude CLI."
 			} else if d.rateLimited {
 				failure = "Claude usage limit reached. Send the message again once the limit resets."
 			}
@@ -293,7 +293,7 @@ func (d *claudeDecoder) consume(m map[string]any) error {
 		}
 		if len(arr(m["permission_denials"])) > 0 {
 			d.status = "blocked"
-			if err := d.emit(Event{Kind: "notice", Status: "blocked", Text: "The native permission policy prevented one or more requested tool operations."}); err != nil {
+			if err := d.emit(Event{Kind: "notice", Status: "blocked", Text: "The permission policy prevented one or more requested tool operations."}); err != nil {
 				return err
 			}
 		}
@@ -305,7 +305,7 @@ func (d *claudeDecoder) consume(m map[string]any) error {
 			return d.emit(Event{Kind: "item.snapshot", ItemID: itemID, Role: "assistant", Text: text(m, "result"), Status: d.status})
 		}
 	case "error":
-		return d.emit(Event{Kind: "notice", Status: "error", Text: "The native Claude client reported an error."})
+		return d.emit(Event{Kind: "notice", Status: "error", Text: "The Claude client reported an error."})
 	default:
 		return nil // Passive native telemetry is not an operator message.
 	}

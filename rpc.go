@@ -98,7 +98,7 @@ func (p *rpcPeer) Call(ctx context.Context, method string, params map[string]any
 		}
 		var result map[string]any
 		if len(w.Result) == 0 || json.Unmarshal(w.Result, &result) != nil || result == nil {
-			return nil, errors.New("invalid native RPC response")
+			return nil, errors.New("invalid RPC response")
 		}
 		return result, nil
 	case <-ctx.Done():
@@ -135,7 +135,7 @@ func (p *rpcPeer) read(output io.Reader) {
 				select {
 				case permits <- struct{}{}:
 				default:
-					_ = p.send(wire{ID: w.ID, Error: &rpcError{-32000, "too many pending native requests"}})
+					_ = p.send(wire{ID: w.ID, Error: &rpcError{-32000, "too many pending requests"}})
 					continue
 				}
 				requestCtx, requestCancel := context.WithCancel(p.ctx)
@@ -228,7 +228,7 @@ func startChild(p Profile, args []string, cwd string, delegatedEnvironment ...st
 	if err = c.Start(); err != nil {
 		input.Close()
 		output.Close()
-		return nil, errors.New("native executable could not start")
+		return nil, errors.New("executable could not start")
 	}
 	return &child{cmd: c, stdin: input, stdout: output, done: make(chan struct{})}, nil
 }

@@ -120,7 +120,7 @@ func NewBroker(root string, profiles []Profile, prepare Prepare, factory Factory
 func (b *Broker) load(path string) error {
 	info, err := os.Lstat(path)
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 || info.Size() > MaxJournalBytes {
-		return errors.New("invalid native session journal")
+		return errors.New("invalid session journal")
 	}
 	file, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND, 0600)
 	if err != nil {
@@ -135,15 +135,15 @@ func (b *Broker) load(path string) error {
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 4096), MaxFrame)
 	if !scanner.Scan() {
-		return errors.New("native journal metadata missing")
+		return errors.New("journal metadata missing")
 	}
 	var record sessionRecord
 	if json.Unmarshal(scanner.Bytes(), &record) != nil || record.SchemaVersion != Schema || !safeID.MatchString(record.ID) || record.Scope.Validate() != nil || filepath.Base(path) != record.ID+".jsonl" {
-		return errors.New("invalid native journal metadata")
+		return errors.New("invalid journal metadata")
 	}
 	infoRecord := record.Session
 	if _, err := commandArgs(infoRecord.Provider); err != nil {
-		return errors.New("invalid native journal provider")
+		return errors.New("invalid journal provider")
 	}
 	s := newSession(infoRecord, file)
 	// Historical journals are validated as a stream, not retained in memory or
@@ -158,7 +158,7 @@ func (b *Broker) load(path string) error {
 	for scanner.Scan() {
 		var e Event
 		if json.Unmarshal(scanner.Bytes(), &e) != nil || e.SchemaVersion != Schema || e.SessionID != infoRecord.ID || e.Provider != infoRecord.Provider || e.Seq != s.info.LastSeq+1 || s.info.LastSeq >= MaxEvents {
-			return errors.New("native journal event identity or sequence mismatch")
+			return errors.New("journal event identity or sequence mismatch")
 		}
 		s.info.LastSeq = e.Seq
 		if e.Kind == "session.identity" {
@@ -170,14 +170,14 @@ func (b *Broker) load(path string) error {
 		s.applyMetadataLocked(e)
 	}
 	if scanner.Err() != nil {
-		return errors.New("native journal could not be read")
+		return errors.New("journal could not be read")
 	}
 	// Scanner accepts a final line without LF. Our writer never does: such a tail
 	// is a crash boundary and cannot be safely appended to.
 	if info.Size() > 0 {
 		last := []byte{0}
 		if _, err = file.ReadAt(last, info.Size()-1); err != nil || last[0] != '\n' {
-			return errors.New("torn native journal; retain for explicit recovery")
+			return errors.New("torn journal; retain for explicit recovery")
 		}
 	}
 	if len(s.queue.Items) > 0 {
@@ -225,7 +225,7 @@ func (s *liveSession) appendLocked(e Event) error {
 		return err
 	}
 	if len(data)+1 >= MaxFrame || s.bytes+int64(len(data)+1) > MaxJournalBytes || s.info.LastSeq >= MaxEvents {
-		err = errors.New("native event journal capacity reached; retain and review this session")
+		err = errors.New("event journal capacity reached; retain and review this session")
 	}
 	if err == nil {
 		file := s.file
@@ -248,7 +248,7 @@ func (s *liveSession) appendLocked(e Event) error {
 		}
 	}
 	if err != nil {
-		s.storageErr = errors.New("native event persistence failed; session stopped")
+		s.storageErr = errors.New("event persistence failed; session stopped")
 		s.info.State = "disconnected"
 		close(s.changed)
 		s.changed = make(chan struct{})
@@ -290,7 +290,7 @@ func (b *Broker) Providers() []Provider {
 			}
 		}
 		err := checkExecutable(p)
-		detail := "Operator-reviewed binary. Native login/billing remains owned by the CLI; not a live subscription check."
+		detail := "Operator-reviewed binary. Login and billing stay with the CLI. This is not a live subscription check."
 		if err != nil {
 			detail = err.Error()
 		}
@@ -364,11 +364,11 @@ func (b *Broker) Create(ctx context.Context, key string, c Create) (Session, err
 	}
 	p.Defaults = selected
 	if b.activeSessionsLocked() >= MaxSessions {
-		return Session{}, errors.New("native worker capacity reached; close a worker before starting another")
+		return Session{}, errors.New("worker capacity reached; close a worker before starting another")
 	}
 	file, err := os.OpenFile(filepath.Join(b.root, id+".jsonl"), os.O_CREATE|os.O_EXCL|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
-		return Session{}, errors.New("cannot create private native session journal")
+		return Session{}, errors.New("cannot create the private session journal")
 	}
 	info := Session{SchemaVersion: Schema, ID: id, Scope: c, Provider: p.Provider, State: "starting", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), Options: p.Defaults, MetadataRevision: 1, RuntimeID: "r_" + randomID()}
 	data, _ := json.Marshal(sessionRecord{Session: info, ProfileSnapshot: &p})
@@ -432,7 +432,7 @@ func (b *Broker) connect(binding context.Context, s *liveSession, p Profile, fre
 	}
 	s.mu.Lock()
 	if !s.stopping && s.info.State != "closed" && err != nil {
-		_ = s.appendLocked(Event{Kind: "notice", Status: "error", Text: "Agent connection failed. Check the pinned CLI, native login and approved workspace; no provider fallback occurred."})
+		_ = s.appendLocked(Event{Kind: "notice", Status: "error", Text: "Agent connection failed. Check the pinned CLI, sign-in, and the approved workspace. No provider fallback occurred."})
 		_ = s.appendLocked(Event{Kind: "session.state", Status: "disconnected"})
 	} else if !s.stopping && s.info.State != "closed" {
 		err = s.appendLocked(Event{Kind: "session.state", Status: "ready"})
@@ -451,7 +451,7 @@ func (b *Broker) receive(s *liveSession, e Event) error {
 	}
 	if e.Kind == "session.identity" {
 		if e.AgentSessionID == "" || len(e.AgentSessionID) > 512 || (s.info.AgentSessionID != "" && s.info.AgentSessionID != e.AgentSessionID) {
-			return errors.New("native session identity changed")
+			return errors.New("session identity changed")
 		}
 	} else if e.TurnID != "" && e.TurnID != s.current {
 		return ErrStale
@@ -609,17 +609,17 @@ func (b *Broker) startPromptLocked(s *liveSession, turn, prompt string, options,
 		if configurable, ok := driver.(optionDriver); ok {
 			err = configurable.PromptWithOptions(ctx, turn, prompt, selected)
 		} else if selected != (AgentOptions{}) {
-			err = errors.New("native driver does not support selected options")
+			err = errors.New("driver does not support selected options")
 		} else {
 			err = driver.Prompt(ctx, turn, prompt)
 		}
 		s.mu.Lock()
 		ended := s.ended
 		if !ended {
-			_ = s.appendLocked(Event{Kind: "turn.end", TurnID: turn, Status: "unknown", Text: "Native transport ended without a confirmed terminal result. This prompt will not be resent."})
+			_ = s.appendLocked(Event{Kind: "turn.end", TurnID: turn, Status: "unknown", Text: "The client transport ended without a confirmed terminal result. This prompt will not be resent."})
 		}
 		if err != nil {
-			_ = s.appendLocked(Event{Kind: "notice", TurnID: turn, Status: "error", Text: "Native turn failed or disconnected; use the native client to inspect authentication, quota or runtime issues."})
+			_ = s.appendLocked(Event{Kind: "notice", TurnID: turn, Status: "error", Text: "The turn failed or disconnected. Check the client for authentication, quota, or runtime issues."})
 		}
 		for _, p := range s.inputs {
 			if p.active {
@@ -820,7 +820,7 @@ func (b *Broker) ReconnectContext(ctx context.Context, id string) error {
 	runtimeID := "r_" + randomID()
 	err = s.appendLocked(Event{Kind: "session.runtime", RuntimeID: runtimeID})
 	if err == nil {
-		err = s.appendLocked(Event{Kind: "session.state", Status: "starting", Text: "Explicit native resume; no prior prompt is replayed."})
+		err = s.appendLocked(Event{Kind: "session.state", Status: "starting", Text: "Resumed the existing session. No prior prompt is replayed."})
 	}
 	s.mu.Unlock()
 	if err == nil {

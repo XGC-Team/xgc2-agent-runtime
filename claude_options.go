@@ -103,7 +103,7 @@ func inspectClaude(ctx context.Context, p Profile, result *ProviderSetting) {
 		}
 	}
 	if strings.Contains(supported, "--permission-mode") && strings.Contains(supported, "--input-format") {
-		result.Permissions = []Permission{{"approval-required", "Ask for approval", "Use native permission prompts with the shared approval surface."}, {"auto-accept-edits", "Accept edits", "Native Claude accepts edits and asks before other restricted actions."}, {"full-access", "Full access", "Bypass native permission prompts for this explicit selection."}, {"plan", "Plan", "Use the native plan permission mode."}}
+		result.Permissions = []Permission{{"approval-required", "Ask for approval", "Use permission prompts with the shared approval surface."}, {"auto-accept-edits", "Accept edits", "Claude accepts edits and asks before other restricted actions."}, {"full-access", "Full access", "Bypass permission prompts for this explicit selection."}, {"plan", "Plan", "Use the plan permission mode."}}
 		result.Defaults.Permission = "approval-required"
 	}
 	if output, _ := cliOutput(ctx, p, "auth", "status", "--json"); len(output) > 0 {
@@ -111,14 +111,14 @@ func inspectClaude(ctx context.Context, p Profile, result *ProviderSetting) {
 		if json.Unmarshal(output, &value) == nil {
 			if logged, ok := value["loggedIn"].(bool); ok {
 				if logged {
-					result.Login = LoginStatus{"authenticated", "Using the existing native Claude login."}
+					result.Login = LoginStatus{"authenticated", "Using the existing Claude login."}
 				} else {
-					result.Login = LoginStatus{"unauthenticated", "Log in using the native Claude client."}
+					result.Login = LoginStatus{"unauthenticated", "Log in using the Claude client."}
 				}
 			}
 		}
 	}
-	result.Detail = "Model capabilities use the fixed T3 Code Claude catalog, filtered by installed CLI version. Native CLI flags carry selections; no model fallback is configured."
+	result.Detail = "Model capabilities use the fixed T3 Code Claude catalog, filtered by installed CLI version. CLI flags carry selections; no model fallback is configured."
 	result.Defaults = mergeOptions(result.Defaults, p.Defaults)
 }
 func claudeOptionArgs(options AgentOptions) ([]string, error) {
@@ -138,7 +138,7 @@ func claudeOptionArgs(options AgentOptions) ([]string, error) {
 	case "plan":
 		args = append(args, "--permission-mode=plan")
 	default:
-		return nil, errors.New("unsupported native Claude permission mode")
+		return nil, errors.New("unsupported Claude permission mode")
 	}
 	return args, nil
 }
@@ -198,7 +198,7 @@ func (c *claudeControl) request(frame map[string]any) {
 		response := map[string]any{"subtype": "success", "request_id": id}
 		if text(body, "subtype") != "can_use_tool" || c.ask == nil {
 			response["subtype"] = "error"
-			response["error"] = "Unsupported native control request"
+			response["error"] = "Unsupported control request"
 		} else {
 			request := Request{Kind: "permission", Title: text(body, "title"), Text: text(body, "description"), Options: []Option{{ID: "allow", Label: "Allow this operation", Kind: "allow_once"}, {ID: "deny", Label: "Decline", Kind: "reject_once"}}, Questions: []Question{}, SourceMethod: "claude:can_use_tool", AgentThreadID: native, AgentItemID: text(body, "tool_use_id")}
 			if request.Title == "" {
@@ -207,7 +207,7 @@ func (c *claudeControl) request(frame map[string]any) {
 			input := obj(body["input"])
 			request.Details = claudePermissionDetails(text(body, "tool_name"), input, body)
 			if text(body, "tool_name") == "AskUserQuestion" {
-				request.Kind, request.Title = "question", "Native agent needs input"
+				request.Kind, request.Title = "question", "Input needed"
 				request.Options = []Option{}
 				for _, raw := range arr(input["questions"]) {
 					value := obj(raw)
@@ -303,7 +303,7 @@ func (d *claudeDriver) promptWithControl(ctx context.Context, turn, prompt strin
 	for scanner.Scan() {
 		var message map[string]any
 		if json.Unmarshal(scanner.Bytes(), &message) != nil {
-			err = errors.New("invalid Claude native control frame")
+			err = errors.New("invalid Claude control frame")
 			break
 		}
 		switch text(message, "type") {
@@ -311,7 +311,7 @@ func (d *claudeDriver) promptWithControl(ctx context.Context, turn, prompt strin
 			response := obj(message["response"])
 			if text(response, "request_id") == "xgc-initialize" && !initialized {
 				if text(response, "subtype") != "success" {
-					err = errors.New("native Claude initialization rejected")
+					err = errors.New("Claude initialization rejected")
 					break
 				}
 				initialized = true
@@ -338,7 +338,7 @@ func (d *claudeDriver) promptWithControl(ctx context.Context, turn, prompt strin
 		}
 	}
 	if scanner.Err() != nil {
-		err = errors.New("native Claude frame exceeds transport limits")
+		err = errors.New("Claude frame exceeds transport limits")
 	}
 	cancel()
 	control.close()
@@ -363,10 +363,10 @@ func (d *claudeDriver) promptWithControl(ctx context.Context, turn, prompt strin
 		return err
 	}
 	if !decoder.terminal {
-		return errors.New("native Claude transport ended without a terminal result")
+		return errors.New("Claude transport ended without a terminal result")
 	}
 	if waitErr != nil && decoder.status == "completed" {
-		return fmt.Errorf("native Claude exited unsuccessfully after its result")
+		return fmt.Errorf("Claude exited unsuccessfully after its result")
 	}
 	return d.sink(Event{Kind: "turn.end", TurnID: turn, Status: decoder.status, SourceMethod: "claude:result"})
 }

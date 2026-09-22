@@ -122,7 +122,7 @@ func parseACPInventory(result *ProviderSetting, setup map[string]any) {
 	}
 	if config := modeConfig(options); config != nil {
 		for _, choice := range configChoices(config) {
-			result.Permissions = append(result.Permissions, Permission{ID: choice.ID, Label: choice.Label, Description: "Native " + choice.Label + " mode."})
+			result.Permissions = append(result.Permissions, Permission{ID: choice.ID, Label: choice.Label, Description: choice.Label + " mode."})
 		}
 		result.Defaults.Permission = text(config, "currentValue")
 	}
@@ -159,7 +159,7 @@ func inspectACP(ctx context.Context, p Profile, result *ProviderSetting) {
 	args, _ := commandArgs(p.Provider)
 	child, err := startChild(p, args, cwd)
 	if err != nil {
-		result.Detail = "Native ACP capability inspection could not start."
+		result.Detail = "ACP capability inspection could not start."
 		return
 	}
 	peer := newPeer(child.stdin, child.stdout, true, func(string, map[string]any) {}, func(context.Context, string, map[string]any) (any, error) { return nil, ErrUnavailable })
@@ -169,24 +169,24 @@ func inspectACP(ctx context.Context, p Profile, result *ProviderSetting) {
 	if p.Provider == "cursor" {
 		capabilities["_meta"] = map[string]any{"parameterizedModelPicker": true}
 	}
-	init, err := peer.Call(ctx, "initialize", map[string]any{"protocolVersion": 1, "clientInfo": map[string]any{"name": "xgc-native-settings", "version": "0.1.0"}, "clientCapabilities": capabilities})
+	init, err := peer.Call(ctx, "initialize", map[string]any{"protocolVersion": 1, "clientInfo": map[string]any{"name": "xgc-agent-runtime", "version": "0.1.0"}, "clientCapabilities": capabilities})
 	if err != nil {
-		result.Detail = "Native ACP metadata handshake failed."
+		result.Detail = "ACP metadata handshake failed."
 		return
 	}
 	parseACPInventory(result, init)
 	if p.Provider == "cursor" {
 		if result.Login.Status != "authenticated" {
-			result.Detail = "Native Cursor login is required before its model catalog can be queried."
+			result.Detail = "Cursor login is required before its model catalog can be queried."
 			return
 		}
 		if _, err = peer.Call(ctx, "authenticate", map[string]any{"methodId": "cursor_login"}); err != nil {
-			result.Detail = "Existing native Cursor login could not be opened."
+			result.Detail = "The existing Cursor login could not be opened."
 			return
 		}
 	}
 	if p.Provider == "grok" && len(result.Models) > 0 {
-		result.Detail = "Model and reasoning metadata came from native ACP initialize; no prompt was sent."
+		result.Detail = "Model and reasoning metadata came from ACP initialize; no prompt was sent."
 		return
 	}
 
@@ -197,7 +197,7 @@ func inspectACP(ctx context.Context, p Profile, result *ProviderSetting) {
 	} // Never trigger interactive login from discovery.
 	setup, err := peer.Call(ctx, "session/new", map[string]any{"cwd": cwd, "mcpServers": []any{}})
 	if err != nil {
-		result.Detail = "Native session capabilities could not be verified before the metadata deadline."
+		result.Detail = "Session capabilities could not be verified before the metadata deadline."
 		return
 	}
 	parseACPInventory(result, setup)
@@ -228,7 +228,7 @@ func inspectACP(ctx context.Context, p Profile, result *ProviderSetting) {
 			}
 		}
 	}
-	result.Detail = "Models and modes were read from the native ACP interface; no prompt was sent."
+	result.Detail = "Models and modes were read from the ACP interface; no prompt was sent."
 }
 func (d *rpcDriver) applyACPOptions(ctx context.Context, o AgentOptions) error {
 	if o == (AgentOptions{}) {
@@ -261,14 +261,14 @@ func (d *rpcDriver) applyACPOptions(ctx context.Context, o AgentOptions) error {
 	if o.Effort != "" && d.profile.Provider != "grok" {
 		config := effortConfig(options)
 		if config == nil {
-			return errors.New("native session does not advertise a reasoning control for the selected model")
+			return errors.New("session does not advertise a reasoning control for the selected model")
 		}
 		valid := false
 		for _, v := range configChoices(config) {
 			valid = valid || v.ID == o.Effort
 		}
 		if !valid {
-			return errors.New("native reasoning selection is no longer available")
+			return errors.New("reasoning selection is no longer available")
 		}
 		if _, err := d.peer.Call(ctx, "session/set_config_option", map[string]any{"sessionId": native, "configId": text(config, "id"), "value": o.Effort}); err != nil {
 			return err
@@ -285,7 +285,7 @@ func (d *rpcDriver) applyACPOptions(ctx context.Context, o AgentOptions) error {
 				valid = valid || v.ID == mode
 			}
 			if !valid {
-				return errors.New("native mode is no longer available")
+				return errors.New("mode is no longer available")
 			}
 			_, err := d.peer.Call(ctx, "session/set_config_option", map[string]any{"sessionId": native, "configId": text(config, "id"), "value": mode})
 			if err != nil {
@@ -297,7 +297,7 @@ func (d *rpcDriver) applyACPOptions(ctx context.Context, o AgentOptions) error {
 				valid = valid || text(obj(raw), "id") == mode
 			}
 			if !valid {
-				return errors.New("native session does not advertise selected mode")
+				return errors.New("session does not advertise the selected mode")
 			}
 			if _, err := d.peer.Call(ctx, "session/set_mode", map[string]any{"sessionId": native, "modeId": mode}); err != nil {
 				return err

@@ -23,7 +23,9 @@ describe('shared provider settings', () => {
   it('localizes shared Settings and composer labels while preserving native model and option labels', () => {
     render(<><AgentProviderSettings settings={doc()} onSave={vi.fn()} onRefresh={vi.fn()} locale="zh" />
       <AgentComposerControls providers={doc().providers} value={{ profileId: 'codex' }} onChange={vi.fn()} locale="zh" /></>)
-    expect(screen.getByLabelText('CLI 路径')).toBeTruthy()
+    const cliPath = screen.getByLabelText('CLI 路径') as HTMLInputElement
+    expect(cliPath.placeholder).toBe('留空以自动发现已安装的 CLI。')
+    expect(cliPath.closest('[data-slot="settings-row"]')?.querySelector('p')).toBeNull()
     expect(screen.getByRole('button', { name: '保存更改' })).toBeTruthy()
     expect(screen.getByText(/登录状态未知/)).toBeTruthy()
     expect(role('agent-composer-model', 'codex').getAttribute('aria-label')).toBe('工作者与模型')
@@ -35,7 +37,8 @@ describe('shared provider settings', () => {
   })
   it('uses only the configuration whitelist and retains truthful unknown login', () => {
     render(<AgentProviderSettings settings={doc()} onSave={vi.fn()} onRefresh={vi.fn()} />)
-    expect(screen.getByLabelText('CLI path')).toBeTruthy()
+    expect((screen.getByLabelText('CLI path') as HTMLInputElement).placeholder).toBe('Leave empty to discover the installed CLI on PATH.')
+    expect(screen.getByLabelText('CLI path').closest('[data-slot="settings-row"]')?.querySelector('p')).toBeNull()
     expect(screen.getByText(/Login status unknown/)).toBeTruthy()
     expect(document.querySelector('input[type="password"]')).toBeNull()
     expect(screen.queryByText(/billing|credential|environment|shell command/i)).toBeNull()
@@ -66,7 +69,11 @@ describe('shared provider settings', () => {
     fireEvent.click(role('agent-provider-select', 'codex'))
     expect((screen.getByLabelText('CLI path') as HTMLInputElement).value).toBe('/draft')
     expect(role('agent-provider-select', 'codex').textContent).not.toContain('1.2.3')
-    expect(role('agent-provider-version', 'codex').textContent).toBe('1.2.3')
+    const login = role('agent-provider-login-status', 'codex')
+    const version = role('agent-provider-version', 'codex')
+    expect(version.textContent).toBe('1.2.3')
+    expect(login.contains(version)).toBe(true)
+    expect(login.className).toContain('whitespace-nowrap')
     view.rerender(<AgentProviderSettings settings={{ revision: 'r1', providers: [provider(), provider('other', { available: false, version: '9.9.9' })] }} onSave={vi.fn()} onRefresh={refresh} />)
     fireEvent.click(role('agent-provider-select', 'other'))
     expect(role('agent-provider-select', 'other').textContent).not.toContain('9.9.9')

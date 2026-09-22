@@ -10,7 +10,8 @@ export function ProviderSettingsPanel({ providers, selectedId, onSelect, childre
   locale?: 'en' | 'zh'; providers: readonly AgentProviderConfiguration[]; selectedId: string; onSelect: (id: string) => void; children: ReactNode;
 }) {
   // 去卡片化：列表-编辑两栏靠留白与发丝线分区，不再套边框底卡（编辑排版纪律）
-  return <div className="lg:grid lg:grid-cols-[13.5rem_minmax(0,1fr)] lg:gap-0">
+  // 8.5rem still fits a provider name. The editor then keeps login and version on one line.
+  return <div className="lg:grid lg:grid-cols-[8.5rem_minmax(0,1fr)] lg:gap-0">
     <div className="mb-3 lg:mb-0" role="navigation" aria-label={locale === 'zh' ? '供应者' : 'Providers'}>
       {providers.map(provider => { const Icon = providerIcons[provider.provider]; const selected = selectedId === provider.id; return <button key={provider.id} type="button"
         onClick={() => onSelect(provider.id)} aria-pressed={selected}

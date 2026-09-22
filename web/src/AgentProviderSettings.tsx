@@ -22,7 +22,7 @@ function configOf(provider: AgentProviderConfiguration): Record<string, unknown>
 function fieldsFor(provider: AgentProviderConfiguration, config: Record<string, unknown>, zh: boolean): ProviderSettingsFieldModel[] {
   const fields: ProviderSettingsFieldModel[] = [
     { key: 'enabled', control: 'switch', label: zh ? '启用' : 'Enabled', clearWhenEmpty: 'persist' },
-    { key: 'binaryPath', control: 'text', label: zh ? 'CLI 路径' : 'CLI path', description: zh ? '留空以自动发现已安装的 CLI。' : 'Leave empty to discover the installed CLI on PATH.', placeholder: zh ? '自动发现' : 'Automatic', clearWhenEmpty: 'persist' },
+    { key: 'binaryPath', control: 'text', label: zh ? 'CLI 路径' : 'CLI path', placeholder: zh ? '留空以自动发现已安装的 CLI。' : 'Leave empty to discover the installed CLI on PATH.', clearWhenEmpty: 'persist' },
   ]
   const choice = (key: string, label: string, options: readonly { id: string; label: string }[]): ProviderSettingsFieldModel => ({
     key, label, control: 'select', clearWhenEmpty: 'omit', options: [{ value: '', label: zh ? '供应者默认值' : 'Provider default' }, ...options.map(option => ({ value: option.id, label: option.label }))],
@@ -70,15 +70,18 @@ export function AgentProviderSettings({ settings, onSave, onRefresh, disabled = 
     <T3PortalContainer value={portal}><TooltipProvider>
       <ProviderSettingsPanel locale={locale} providers={settings.providers} selectedId={provider?.id ?? ''} onSelect={setSelected}>
         {provider ? <section key={provider.id} data-xgc-role="agent-provider-editor" data-xgc-id={provider.id}>
-          <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0"><h3 className="text-[15px] font-medium tracking-[-0.005em]">{providerLabels[provider.provider]}</h3>
-              {provider.available && provider.version ? <p className="mt-1 text-xs text-muted-foreground" data-xgc-role="agent-provider-version" data-xgc-id={provider.id}>{provider.version}</p> : null}
-              <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground" data-xgc-role="agent-provider-login-status" data-xgc-id={provider.id}>
-                <span aria-hidden className={provider.login.status === 'authenticated' ? 'inline-block h-1.5 w-1.5 rounded-full bg-current' : 'inline-block h-1.5 w-1.5 rounded-full border border-current opacity-50'} />
-                {provider.login.status === 'authenticated' ? (zh ? '已登录' : 'Signed in') : provider.login.status === 'unauthenticated' ? (zh ? '未登录' : 'Not signed in') : (zh ? '登录状态未知' : 'Login status unknown')}{provider.login.detail ? ` · ${provider.login.detail}` : ''}
-              </p>
+          <div className="mb-5">
+            <div className="flex items-start justify-between gap-3">
+              <h3 className="min-w-0 text-[15px] font-medium tracking-[-0.005em]">{providerLabels[provider.provider]}</h3>
+              {onRefresh ? <Button type="button" size="sm" variant="ghost" disabled={locked} onClick={() => void run('refresh')} data-xgc-role="agent-provider-refresh" data-xgc-id={provider.id}>{zh ? '刷新状态' : 'Refresh status'}</Button> : null}
             </div>
-            {onRefresh ? <Button type="button" size="sm" variant="ghost" disabled={locked} onClick={() => void run('refresh')} data-xgc-role="agent-provider-refresh" data-xgc-id={provider.id}>{zh ? '刷新状态' : 'Refresh status'}</Button> : null}
+            <p className="mt-1 flex min-w-0 items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground" data-xgc-role="agent-provider-login-status" data-xgc-id={provider.id}>
+              <span aria-hidden className={provider.login.status === 'authenticated' ? 'inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-current' : 'inline-block h-1.5 w-1.5 shrink-0 rounded-full border border-current opacity-50'} />
+              <span className="min-w-0">
+                {provider.login.status === 'authenticated' ? (zh ? '已登录' : 'Signed in') : provider.login.status === 'unauthenticated' ? (zh ? '未登录' : 'Not signed in') : (zh ? '登录状态未知' : 'Login status unknown')}{provider.login.detail ? ` · ${provider.login.detail}` : ''}
+                {provider.available && provider.version ? <>{' · '}<span data-xgc-role="agent-provider-version" data-xgc-id={provider.id}>{provider.version}</span></> : null}
+              </span>
+            </p>
           </div>
           <fieldset disabled={locked || !onSave} className="min-w-0">
             <ProviderSettingsForm key={provider.id} fields={fieldsFor(provider, config, zh)} variant="settings" idPrefix={provider.id} value={config} onChange={next => {

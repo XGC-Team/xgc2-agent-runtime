@@ -1,7 +1,8 @@
-// Package agentruntime is a client of native agents, not a model gateway or agent loop.
+// Package agentruntime presents local third-party agent CLIs through one conversation contract.
 package agentruntime
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -63,10 +64,18 @@ func LoadConfig(path string) ([]Profile, error) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, errors.New("cannot read native agent configuration")
+		return nil, errors.New("cannot read agent runtime configuration")
 	}
 	defer f.Close()
-	return decodeConfig(f)
+	profiles, err := decodeConfig(f)
+	if err != nil {
+		return nil, err
+	}
+	raw, readErr := os.ReadFile(path)
+	if readErr == nil && bytes.Contains(raw, []byte("xgc.native-agent/v1")) {
+		_ = os.WriteFile(path, bytes.Replace(raw, []byte("xgc.native-agent/v1"), []byte(Schema), 1), 0600)
+	}
+	return profiles, nil
 }
 func decodeConfig(r io.Reader) ([]Profile, error) {
 	var err error
@@ -74,13 +83,16 @@ func decodeConfig(r io.Reader) ([]Profile, error) {
 	d := json.NewDecoder(io.LimitReader(r, 64<<10))
 	d.DisallowUnknownFields()
 	if err = d.Decode(&c); err != nil {
-		return nil, errors.New("invalid native agent configuration")
+		return nil, errors.New("invalid agent runtime configuration")
 	}
 	if err = d.Decode(new(any)); err != io.EOF {
-		return nil, errors.New("trailing native agent configuration")
+		return nil, errors.New("trailing agent runtime configuration")
+	}
+	if c.SchemaVersion == "xgc.native-agent/v1" {
+		c.SchemaVersion = Schema
 	}
 	if c.SchemaVersion != Schema || len(c.Profiles) > 16 {
-		return nil, errors.New("unsupported native agent configuration")
+		return nil, errors.New("unsupported agent runtime configuration")
 	}
 	seen := map[string]bool{}
 	for _, p := range c.Profiles {

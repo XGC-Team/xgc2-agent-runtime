@@ -1,4 +1,4 @@
-package nativeagent
+package agentruntime
 
 import (
 	"errors"
@@ -10,11 +10,11 @@ import (
 const maxQueuedPrompts = 20
 
 type QueuedPrompt struct {
-	ID             string        `json:"id"`
-	Text           string        `json:"text"`
-	Options        NativeOptions `json:"options"`
-	RequestOptions NativeOptions `json:"requestOptions"`
-	CreatedAt      string        `json:"createdAt"`
+	ID             string       `json:"id"`
+	Text           string       `json:"text"`
+	Options        AgentOptions `json:"options"`
+	RequestOptions AgentOptions `json:"requestOptions"`
+	CreatedAt      string       `json:"createdAt"`
 }
 type PromptQueue struct {
 	Revision uint64         `json:"revision"`
@@ -22,12 +22,12 @@ type PromptQueue struct {
 	Items    []QueuedPrompt `json:"items"`
 }
 type QueueCommand struct {
-	Operation        string        `json:"operation"`
-	ExpectedRevision uint64        `json:"expectedRevision"`
-	ID               string        `json:"id,omitempty"`
-	Text             string        `json:"text,omitempty"`
-	Options          NativeOptions `json:"options,omitempty"`
-	Order            []string      `json:"order,omitempty"`
+	Operation        string       `json:"operation"`
+	ExpectedRevision uint64       `json:"expectedRevision"`
+	ID               string       `json:"id,omitempty"`
+	Text             string       `json:"text,omitempty"`
+	Options          AgentOptions `json:"options,omitempty"`
+	Order            []string     `json:"order,omitempty"`
 }
 
 func validQueuedText(text string) bool {

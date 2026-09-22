@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { applyEvent, emptyStream, type NativeSession } from './state.js'
+import { applyEvent, emptyStream, type AgentSession } from './state.js'
 import { nativeAgentBasePath } from './client.js'
 
-export type NativeStreamTransport = (options: {
+export type AgentStreamTransport = (options: {
   url: string
   lastEventId: () => string
   onEvent: (event: unknown) => void
@@ -11,9 +11,9 @@ export type NativeStreamTransport = (options: {
   onInvalid: (cause: unknown) => void
 }) => { close: () => void }
 
-export type NativeStreamOptions = { basePath: string; openStream?: NativeStreamTransport }
+export type AgentStreamOptions = { basePath: string; openStream?: AgentStreamTransport }
 
-const openEventSource: NativeStreamTransport = (options) => {
+const openEventSource: AgentStreamTransport = (options) => {
   const stream = new EventSource(options.url)
   stream.addEventListener('native-agent', (message) => {
     try { options.onEvent(JSON.parse((message as MessageEvent<string>).data) as unknown) }
@@ -24,7 +24,7 @@ const openEventSource: NativeStreamTransport = (options) => {
   return stream
 }
 
-export function useNativeStream(session: NativeSession | undefined, reload: number, { basePath, openStream = openEventSource }: NativeStreamOptions) {
+export function useAgentStream(session: AgentSession | undefined, reload: number, { basePath, openStream = openEventSource }: AgentStreamOptions) {
   const root = nativeAgentBasePath(basePath)
   const initial = () => emptyStream(session?.id ?? '', session?.provider ?? 'codex')
   const current = useRef(initial())
@@ -44,7 +44,7 @@ export function useNativeStream(session: NativeSession | undefined, reload: numb
     let queue: unknown[] = []
     // Transport callbacks may run before openStream returns its close handle.
     // eslint-disable-next-line prefer-const
-    let stream: ReturnType<NativeStreamTransport> | undefined
+    let stream: ReturnType<AgentStreamTransport> | undefined
     let invalid = false
     const fail = (cause: unknown) => {
       if (!active) return

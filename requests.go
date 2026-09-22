@@ -1,4 +1,4 @@
-package nativeagent
+package agentruntime
 
 import (
 	"context"
@@ -22,9 +22,9 @@ func (d *rpcDriver) onRequest(ctx context.Context, method string, p map[string]a
 	defer cancel()
 	r := Request{Kind: "permission", Title: method, Options: []Option{}, Questions: []Question{}, SourceMethod: method}
 	if d.profile.Provider == "codex" {
-		r.NativeThreadID = text(p, "threadId")
-		r.NativeTurnID = text(p, "turnId")
-		r.NativeItemID = text(p, "itemId")
+		r.AgentThreadID = text(p, "threadId")
+		r.AgentTurnID = text(p, "turnId")
+		r.AgentItemID = text(p, "itemId")
 	}
 	switch method {
 	case "session/request_permission":
@@ -164,7 +164,7 @@ func (d *rpcDriver) onRequest(ctx context.Context, method string, p map[string]a
 	}
 }
 func validateRequest(r Request) error {
-	for _, value := range []string{r.NativeThreadID, r.NativeTurnID, r.NativeItemID, r.SourceMethod} {
+	for _, value := range []string{r.AgentThreadID, r.AgentTurnID, r.AgentItemID, r.SourceMethod} {
 		if len(value) > 512 {
 			return errors.New("native request identity exceeds display limits")
 		}

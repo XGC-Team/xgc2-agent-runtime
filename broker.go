@@ -1,4 +1,4 @@
-package nativeagent
+package agentruntime
 
 import (
 	"bufio"
@@ -72,7 +72,7 @@ type Broker struct {
 
 func NewBroker(root string, profiles []Profile, prepare Prepare, factory Factory) (*Broker, error) {
 	if prepare == nil {
-		return nil, errors.New("native workspace preparation is required")
+		return nil, errors.New("workspace preparation is required")
 	}
 	if factory == nil {
 		factory = NewDriver
@@ -82,7 +82,7 @@ func NewBroker(root string, profiles []Profile, prepare Prepare, factory Factory
 	}
 	info, err := os.Lstat(root)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0077 != 0 {
-		return nil, errors.New("native journal root must be an owned private directory")
+		return nil, errors.New("agent runtime journal must be an owned private directory")
 	}
 	root, err = filepath.Abs(root)
 	if err != nil {
@@ -92,7 +92,7 @@ func NewBroker(root string, profiles []Profile, prepare Prepare, factory Factory
 	b := &Broker{ctx: ctx, cancel: cancel, root: root, profiles: map[string]Profile{}, sessions: map[string]*liveSession{}, prepare: prepare, factory: factory}
 	for _, p := range profiles {
 		if _, ok := b.profiles[p.ID]; ok {
-			return nil, errors.New("duplicate native profile")
+			return nil, errors.New("duplicate provider profile")
 		}
 		if _, err := commandArgs(p.Provider); err != nil {
 			return nil, err
@@ -162,7 +162,7 @@ func (b *Broker) load(path string) error {
 		}
 		s.info.LastSeq = e.Seq
 		if e.Kind == "session.identity" {
-			s.info.NativeSessionID = e.NativeSessionID
+			s.info.AgentSessionID = e.AgentSessionID
 		}
 		if e.Kind == "session.state" {
 			s.info.State = e.Status
@@ -263,7 +263,7 @@ func (s *liveSession) appendLocked(e Event) error {
 		s.info.State = e.Status
 	}
 	if e.Kind == "session.identity" {
-		s.info.NativeSessionID = e.NativeSessionID
+		s.info.AgentSessionID = e.AgentSessionID
 	}
 	s.applyMetadataLocked(e)
 	close(s.changed)
@@ -392,7 +392,7 @@ func (b *Broker) connect(binding context.Context, s *liveSession, p Profile, fre
 	ctx, cancel := context.WithTimeout(sessionBindingContext{Context: b.ctx, values: binding}, 65*time.Second)
 	defer cancel()
 	s.mu.Lock()
-	scope, id, native := s.info.Scope, s.info.ID, s.info.NativeSessionID
+	scope, id, native := s.info.Scope, s.info.ID, s.info.AgentSessionID
 	if s.stopping || s.info.State == "closed" || s.info.Archived || s.info.RuntimeID != runtimeID {
 		s.mu.Unlock()
 		return
@@ -432,7 +432,7 @@ func (b *Broker) connect(binding context.Context, s *liveSession, p Profile, fre
 	}
 	s.mu.Lock()
 	if !s.stopping && s.info.State != "closed" && err != nil {
-		_ = s.appendLocked(Event{Kind: "notice", Status: "error", Text: "Native connection failed. Check the pinned CLI, native login and approved workspace; no provider fallback occurred."})
+		_ = s.appendLocked(Event{Kind: "notice", Status: "error", Text: "Agent connection failed. Check the pinned CLI, native login and approved workspace; no provider fallback occurred."})
 		_ = s.appendLocked(Event{Kind: "session.state", Status: "disconnected"})
 	} else if !s.stopping && s.info.State != "closed" {
 		err = s.appendLocked(Event{Kind: "session.state", Status: "ready"})
@@ -450,7 +450,7 @@ func (b *Broker) receive(s *liveSession, e Event) error {
 		return ErrStale
 	}
 	if e.Kind == "session.identity" {
-		if e.NativeSessionID == "" || len(e.NativeSessionID) > 512 || (s.info.NativeSessionID != "" && s.info.NativeSessionID != e.NativeSessionID) {
+		if e.AgentSessionID == "" || len(e.AgentSessionID) > 512 || (s.info.AgentSessionID != "" && s.info.AgentSessionID != e.AgentSessionID) {
 			return errors.New("native session identity changed")
 		}
 	} else if e.TurnID != "" && e.TurnID != s.current {
@@ -512,9 +512,9 @@ func (b *Broker) List() []Session {
 	return result
 }
 func (b *Broker) Prompt(id, key, prompt string) (string, error) {
-	return b.PromptWithOptions(id, key, prompt, NativeOptions{})
+	return b.PromptWithOptions(id, key, prompt, AgentOptions{})
 }
-func (b *Broker) PromptWithOptions(id, key, prompt string, options NativeOptions) (string, error) {
+func (b *Broker) PromptWithOptions(id, key, prompt string, options AgentOptions) (string, error) {
 	if err := validKey(key); err != nil {
 		return "", err
 	}
@@ -588,7 +588,7 @@ func (b *Broker) PromptWithOptions(id, key, prompt string, options NativeOptions
 }
 
 // Caller owns both broker and session locks.
-func (b *Broker) startPromptLocked(s *liveSession, turn, prompt string, options, selected NativeOptions) (string, error) {
+func (b *Broker) startPromptLocked(s *liveSession, turn, prompt string, options, selected AgentOptions) (string, error) {
 	s.current = turn
 	s.ended = false
 	s.lastTurnStatus = ""
@@ -608,7 +608,7 @@ func (b *Broker) startPromptLocked(s *liveSession, turn, prompt string, options,
 		var err error
 		if configurable, ok := driver.(optionDriver); ok {
 			err = configurable.PromptWithOptions(ctx, turn, prompt, selected)
-		} else if selected != (NativeOptions{}) {
+		} else if selected != (AgentOptions{}) {
 			err = errors.New("native driver does not support selected options")
 		} else {
 			err = driver.Prompt(ctx, turn, prompt)

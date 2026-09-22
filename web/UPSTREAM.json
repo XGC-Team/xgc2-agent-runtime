@@ -147,7 +147,7 @@
       "upstreamSha256": "966fb5b815d8cbcc3f391d6dfc17d35d09352a231f710ca32b1a75567de77b1d",
       "upstreamUrl": "https://github.com/pingdotgg/t3code/blob/bf3be75c400cf605dc0c80de9458458854c84131/apps/web/src/components/chat/MessagesTimeline.tsx",
       "migration": "presentation-slices",
-      "changes": "Adapt source list geometry and maintainScrollAtEnd policy, user bubble/disclosure, assistant row treatment and PlainWorkEntryRow keyboard disclosure into the XGC native model. Structured tool payload rendering, optional timestamps, partial-content notices, custom domain slots, an optional host-provided empty-state node and follow-state integration are XGC adaptations. The floating latest-message action is omitted; initial bottom positioning, manual history scrolling and active tail-follow remain. Preserve immutable list data and stable item/spacing callbacks across unrelated composer or host renders. This is not the original complete Timeline implementation. Exclude original IDE TimelineRowCtx, turn folding/work-group model, minimap, attachment previews, source/diff navigation, terminal contexts and per-turn scroll snapshots. Render bounded, validated MCP image thumbnails through the XGC NativeToolImages adapter beside their tool result.",
+      "changes": "Adapt source list geometry and maintainScrollAtEnd policy, user bubble/disclosure, assistant row treatment and PlainWorkEntryRow keyboard disclosure into the XGC native model. Structured tool payload rendering, optional timestamps, partial-content notices, custom domain slots, an optional host-provided empty-state node and follow-state integration are XGC adaptations. The floating latest-message action is omitted; initial bottom positioning, manual history scrolling and active tail-follow remain. Preserve immutable list data and stable item/spacing callbacks across unrelated composer or host renders. This is not the original complete Timeline implementation. Exclude original IDE TimelineRowCtx, turn folding/work-group model, minimap, attachment previews, source/diff navigation, terminal contexts and per-turn scroll snapshots. Render bounded, validated MCP image thumbnails through the XGC AgentToolImages adapter beside their tool result.",
       "retainedSections": [
         {
           "symbol": "TIMELINE_MAINTAIN_SCROLL_AT_END",
@@ -430,15 +430,15 @@
   ],
   "hostIntegrationFiles": [
     "src/T3Conversation.tsx",
-    "src/NativeConversation.tsx",
-    "src/nativePresentation.ts",
+    "src/AgentConversation.tsx",
+    "src/agentPresentation.ts",
     "src/upstream/t3/types.ts",
     "src/upstream/t3/identity.ts",
     "src/t3-theme.css",
     "src/t3-host-tokens.css",
     "scripts/scope-styles.mjs",
-    "src/NativeProviderSettings.tsx",
-    "src/NativeComposerControls.tsx",
+    "src/AgentProviderSettings.tsx",
+    "src/AgentComposerControls.tsx",
     "src/providerSettings.ts"
   ],
   "validationFiles": [
@@ -455,13 +455,13 @@
     "files": [
       "src/state.ts",
       "src/client.ts",
-      "src/useNativeStream.ts"
+      "src/useAgentStream.ts"
     ],
     "note": "The shared native state, transport and request-answer contract are owned by XGC. This presentation migration does not import the T3 Code server or its Codex app-server client."
   },
   "styleIntegration": {
     "manifest": "STYLE_UPSTREAM.json",
-    "selectorScope": ".xgc-native-chat via native CSS @scope; no unsupported-browser fallback is provided",
+    "selectorScope": ".xgc-agent-chat via native CSS @scope; no unsupported-browser fallback is provided",
     "reset": "Tailwind preflight is included inside the chat scope. It is not installed as a global page reset, and it also applies to custom timeline slots inside that scope.",
     "globalRegistrations": "CSS @property and keyframes registrations remain global and are renamed with --xgc-t3- / xgc-t3- prefixes.",
     "hostRequirements": [
@@ -515,11 +515,11 @@
     "callbacks": "Send, request answer, request cancellation and whole-turn interruption remain distinct real callbacks. Submitted requests stay locked pending native resolution. Missing send/interrupt capabilities do not create placeholder operation controls.",
     "drafts": "Controlled drafts are retained on send failure and are cleared on success only if unchanged; host domains own session-specific persistence and idempotency.",
     "ssr": "The virtualized timeline renders an unmeasured viewport on the server; message rows appear after browser measurement. ESM/SSR import support is not full server rendering of the message history.",
-    "localization": "locale=zh localizes selected mapper labels. Upstream Composer, request actions and other controls still use English. NativeInput does not currently consume its locale prop. New NativeProviderSettings and NativeComposerControls support en/zh for fixed UI labels; native capability labels/IDs are not translated.",
+    "localization": "locale=zh localizes selected mapper labels. Upstream Composer, request actions and other controls still use English. AgentInput does not currently consume its locale prop. New AgentProviderSettings and AgentComposerControls support en/zh for fixed UI labels; native capability labels/IDs are not translated.",
     "toolPresentation": "Structured command, file-change and MCP fields have selected presentation support. commandActions and webSearch details can be retained in native state without a dedicated rich view. This is not complete T3 Code or Codex protocol UI coverage.",
     "history": "Missing timestamps are not manufactured. Partial payloads are marked; historical free-form answers are not reconstructed from submission/resolution events.",
-    "providerSettings": "NativeProviderSettings accepts the decoded settings document plus explicit onSave(update) and onRefresh(profileId) callbacks. Shared whitelist exposes enabled, CLI path and verified default model/effort/permission fields. Draft revisions are captured at the first edit and preserved across refreshes and failures. No authentication credentials or environment configuration.",
-    "composerOptions": "NativeComposerControls accepts provider capabilities, a controlled NativeComposerSelection and an onChange callback. Selection changes only host draft state; NativeConversation accepts a composerControls slot. Exact options are passed by the host as the fourth sendNativePrompt argument or Scope.options at create. Cross-provider selection does not copy previous permissions or effort. No session/project/Git management UI. Optional identityId scopes annotation roles when multiple real controls share a provider."
+    "providerSettings": "AgentProviderSettings accepts the decoded settings document plus explicit onSave(update) and onRefresh(profileId) callbacks. Shared whitelist exposes enabled, CLI path and verified default model/effort/permission fields. Draft revisions are captured at the first edit and preserved across refreshes and failures. No authentication credentials or environment configuration.",
+    "composerOptions": "AgentComposerControls accepts provider capabilities, a controlled AgentComposerSelection and an onChange callback. Selection changes only host draft state; AgentConversation accepts a composerControls slot. Exact options are passed by the host as the fourth sendNativePrompt argument or Scope.options at create. Cross-provider selection does not copy previous permissions or effort. No session/project/Git management UI. Optional identityId scopes annotation roles when multiple real controls share a provider."
   },
-  "resync": "2026-09-15: 6349a0e -> bf3be75. Ported: timeline smooth follow-scroll while streaming (reduced-motion guarded); composer banner 1px mask seam fix; button active-scale excluded for popup triggers; select showCheck removal; switch mixed state; scroll-area scrollFadePadding; combobox single-select anchor fix + chip a11y; useCommitOnBlur IME guard; collapsible reduced-motion; SettingsRow aria-disabled. Reviewed, not applicable: ChatComposer rewrite areas outside the option-controls slice; editor terminal-context/clipboard refactors; full ChatMarkdown renderer (Shiki/diff/task-list); model-picker sidebar/favorites/shortcuts; pending-question attachments and dismiss (need native contract first); MessageCopyButton extraFlavors (no consumer); spinner visible-animation system. 2026-09-17: aligned per-file upstreamUrl pins, source header refs and UPSTREAM.md prose to bf3be75; verified recorded upstreamSha256 against bf3be75 content (spot-checked ui/tooltip.tsx, ui/button.tsx). 2026-09-17: single-point port review of the streaming-chat improvements, all confirmed ancestors of the bf3be75 pin. Ported PR #11193 (markdown-incremental.ts verbatim plus ChatMarkdown wiring with an isStreaming prop handed off from the assistant timeline row); unified 11.0.5 and @types/mdast 4.0.4 promoted to direct dependencies. Reviewed, not applicable: #10444/#10437/#10463 composer collapse and focus restoration live in the excluded ChatView/ChatComposer footer-layout and composer-handle layers (no composer collapse exists in this slice); #11884 requires the excluded composerHandleContext focus bridge; #10118 targets the excluded MessagesTimeline.logic checkpoint map (no checkpoint concept here); the 7fbc545a/de545c41/11601da8 banner/footer fixes were already ported in the 2026-09-15 resync. Open, not ported: #11442 large-paste text attachments (attachment pipeline excluded); #11673 queuedMessageStore semantics only compared against NativePromptQueue (missing semantics recorded in UPSTREAM.md), implementation not ported (zustand/T3 contracts coupling)."
+  "resync": "2026-09-15: 6349a0e -> bf3be75. Ported: timeline smooth follow-scroll while streaming (reduced-motion guarded); composer banner 1px mask seam fix; button active-scale excluded for popup triggers; select showCheck removal; switch mixed state; scroll-area scrollFadePadding; combobox single-select anchor fix + chip a11y; useCommitOnBlur IME guard; collapsible reduced-motion; SettingsRow aria-disabled. Reviewed, not applicable: ChatComposer rewrite areas outside the option-controls slice; editor terminal-context/clipboard refactors; full ChatMarkdown renderer (Shiki/diff/task-list); model-picker sidebar/favorites/shortcuts; pending-question attachments and dismiss (need native contract first); MessageCopyButton extraFlavors (no consumer); spinner visible-animation system. 2026-09-17: aligned per-file upstreamUrl pins, source header refs and UPSTREAM.md prose to bf3be75; verified recorded upstreamSha256 against bf3be75 content (spot-checked ui/tooltip.tsx, ui/button.tsx). 2026-09-17: single-point port review of the streaming-chat improvements, all confirmed ancestors of the bf3be75 pin. Ported PR #11193 (markdown-incremental.ts verbatim plus ChatMarkdown wiring with an isStreaming prop handed off from the assistant timeline row); unified 11.0.5 and @types/mdast 4.0.4 promoted to direct dependencies. Reviewed, not applicable: #10444/#10437/#10463 composer collapse and focus restoration live in the excluded ChatView/ChatComposer footer-layout and composer-handle layers (no composer collapse exists in this slice); #11884 requires the excluded composerHandleContext focus bridge; #10118 targets the excluded MessagesTimeline.logic checkpoint map (no checkpoint concept here); the 7fbc545a/de545c41/11601da8 banner/footer fixes were already ported in the 2026-09-15 resync. Open, not ported: #11442 large-paste text attachments (attachment pipeline excluded); #11673 queuedMessageStore semantics only compared against AgentPromptQueue (missing semantics recorded in UPSTREAM.md), implementation not ported (zustand/T3 contracts coupling)."
 }

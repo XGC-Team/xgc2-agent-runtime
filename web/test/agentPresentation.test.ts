@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { emptyStream, type NativeItem, type NativeRequest, type StreamState } from '../src/state.js'
-import { nativeApprovalAnswer, nativeCancelAnswer, nativeConversationModel, nativeQuestionAnswer } from '../src/nativePresentation.js'
+import { emptyStream, type AgentItem, type AgentRequest, type StreamState } from '../src/state.js'
+import { nativeApprovalAnswer, nativeCancelAnswer, nativeConversationModel, nativeQuestionAnswer } from '../src/agentPresentation.js'
 
 function state(): StreamState { return { ...emptyStream('session-a', 'codex'), worker: 'running', activeTurnId: 'turn-a' } }
-function item(patch: Partial<NativeItem> = {}): NativeItem {
+function item(patch: Partial<AgentItem> = {}): AgentItem {
   return { id: 'item-a', key: '["turn-a","item-a"]', turnId: 'turn-a', role: 'assistant', title: '', text: 'Hello', status: 'running', truncated: false, ...patch }
 }
-function permission(): NativeRequest & { submitted: boolean } {
+function permission(): AgentRequest & { submitted: boolean } {
   return { id: 'approval-a', kind: 'permission', title: 'Read the log', options: [{ id: 'accept', label: 'Allow once', kind: 'allow_once' }, { id: 'decline', label: 'Decline', kind: 'reject_once' }], questions: [], submitted: false }
 }
-function question(): NativeRequest & { submitted: boolean } {
+function question(): AgentRequest & { submitted: boolean } {
   return { id: 'question-a', kind: 'question', title: 'Choose evidence', options: [], submitted: false, questions: [
     { id: 'logs', header: 'Evidence', text: 'Which logs?', options: [{ id: 'flight', label: 'Flight log', kind: 'answer', description: 'Flight controller log' }, { id: 'ros', label: 'ROS log', kind: 'answer' }], multiple: true, freeText: false },
   ] }

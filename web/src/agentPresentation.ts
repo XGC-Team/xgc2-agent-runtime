@@ -1,13 +1,13 @@
-import type { NativeAnswer, NativeItem, NativeRequest, StreamState } from './state.js'
+import type { AgentAnswer, AgentItem, AgentRequest, StreamState } from './state.js'
 import type { PendingApproval, PendingUserInput, T3ConversationModel, TimelineItem, ToolData } from './upstream/t3/types.js'
 
-export type NativeLocale = 'en' | 'zh'
+export type AgentLocale = 'en' | 'zh'
 const copy = {
   en: { tool: 'Tool activity', activity: 'Activity', plan: 'Plan', request: 'Agent request', unconfirmed: 'Completion unconfirmed', cancelled: 'Cancelled', lastTurn: 'Last turn' },
   zh: { tool: '工具活动', activity: '活动', plan: '计划', request: 'Agent 请求', unconfirmed: '完成结果未确认', cancelled: '已取消', lastTurn: '上一轮结果' },
 }
 
-function toolData(item: NativeItem, locale: NativeLocale): ToolData | undefined {
+function toolData(item: AgentItem, locale: AgentLocale): ToolData | undefined {
   const details = item.details
   if (!details) return undefined
   switch (details.type) {
@@ -33,7 +33,7 @@ function toolData(item: NativeItem, locale: NativeLocale): ToolData | undefined 
   }
 }
 
-function timelineItem(item: NativeItem, state: StreamState, locale: NativeLocale): TimelineItem {
+function timelineItem(item: AgentItem, state: StreamState, locale: AgentLocale): TimelineItem {
   // The journal key includes the turn; native item IDs alone are not globally unique.
   const id = JSON.stringify([state.sessionId, item.turnId, item.id])
   if (item.role === 'user' || item.role === 'assistant') {
@@ -56,13 +56,13 @@ function timelineItem(item: NativeItem, state: StreamState, locale: NativeLocale
     command: data?.command, toolData: data, displayTruncated: item.truncated || item.details?.truncated }
 }
 
-function approvalKind(request: NativeRequest): string {
+function approvalKind(request: AgentRequest): string {
   if (request.sourceMethod === 'item/commandExecution/requestApproval') return 'command'
   if (request.sourceMethod === 'item/fileChange/requestApproval') return 'file-change'
   return request.kind
 }
 
-export function nativeRequestPresentation(request: NativeRequest & { submitted: boolean }, locale: NativeLocale = 'en'):
+export function nativeRequestPresentation(request: AgentRequest & { submitted: boolean }, locale: AgentLocale = 'en'):
   { approval: PendingApproval; userInput?: never } | { userInput: PendingUserInput; approval?: never } {
   if (request.kind === 'question') {
     return { userInput: { requestId: request.id, createdAt: request.createdAt, submitted: request.submitted, title: request.title,
@@ -79,7 +79,7 @@ export function nativeRequestPresentation(request: NativeRequest & { submitted: 
     options: request.options.map((option) => ({ decision: option.id, label: option.label, warning: option.description })) } }
 }
 
-export function nativeConversationModel(state: StreamState, locale: NativeLocale = 'en'): T3ConversationModel {
+export function nativeConversationModel(state: StreamState, locale: AgentLocale = 'en'): T3ConversationModel {
   const approvals: PendingApproval[] = [], userInputs: PendingUserInput[] = []
   for (const request of Object.values(state.pending)) {
     const mapped = nativeRequestPresentation(request, locale)
@@ -93,7 +93,7 @@ export function nativeConversationModel(state: StreamState, locale: NativeLocale
     isRunning: ['running', 'awaiting-input', 'cancelling'].includes(state.worker) }
 }
 
-function approvalDetail(request: NativeRequest): string | undefined {
+function approvalDetail(request: AgentRequest): string | undefined {
   const details = request.details
   const parts = [request.text?.trim(), details?.command?.trim(),
     details?.target ? `Target: ${details.target}` : '', details?.preview,
@@ -104,19 +104,19 @@ function approvalDetail(request: NativeRequest): string | undefined {
   return [...new Set(parts.filter((part): part is string => Boolean(part)))].join('\n') || undefined
 }
 
-function pendingRequest(state: StreamState, requestId: string): NativeRequest {
+function pendingRequest(state: StreamState, requestId: string): AgentRequest {
   const request = state.pending[requestId]
   if (!request || request.submitted) throw new Error('This request is no longer awaiting an answer.')
   return request
 }
 
-export function nativeApprovalAnswer(state: StreamState, requestId: string, decision: string): NativeAnswer {
+export function nativeApprovalAnswer(state: StreamState, requestId: string, decision: string): AgentAnswer {
   const request = pendingRequest(state, requestId)
   if (request.kind === 'question' || !request.options.some((option) => option.id === decision)) throw new Error('This decision was not offered by the native session.')
   return { optionId: decision }
 }
 
-export function nativeQuestionAnswer(state: StreamState, requestId: string, answers: Record<string, string[]>): NativeAnswer {
+export function nativeQuestionAnswer(state: StreamState, requestId: string, answers: Record<string, string[]>): AgentAnswer {
   const request = pendingRequest(state, requestId)
   if (request.kind !== 'question' || Object.keys(answers).length !== request.questions.length) throw new Error('Answer each question in this request.')
   const result: Record<string, string[]> = {}
@@ -132,7 +132,7 @@ export function nativeQuestionAnswer(state: StreamState, requestId: string, answ
   return { answers: result }
 }
 
-export function nativeCancelAnswer(state: StreamState, requestId: string): NativeAnswer {
+export function nativeCancelAnswer(state: StreamState, requestId: string): AgentAnswer {
   pendingRequest(state, requestId)
   return { cancel: true }
 }

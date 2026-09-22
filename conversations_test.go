@@ -1,4 +1,4 @@
-package nativeagent
+package agentruntime
 
 import (
 	"context"
@@ -32,7 +32,7 @@ func (d *conversationDriver) Open(_ context.Context, _ string, nativeID string) 
 	if nativeID == "" {
 		nativeID = "fixture-thread"
 	}
-	return d.sink(Event{Kind: "session.identity", NativeSessionID: nativeID})
+	return d.sink(Event{Kind: "session.identity", AgentSessionID: nativeID})
 }
 func (d *conversationDriver) Prompt(ctx context.Context, turn, prompt string) error {
 	_, err := d.ask(ctx, Request{Kind: "permission", Title: "Run fixture", Text: "sensitive request detail", Options: []Option{{ID: "yes", Kind: "allow_once"}, {ID: "no", Kind: "reject_once"}}})
@@ -101,7 +101,7 @@ func TestConversationMetadataArchiveAndResumeKeepIdentity(t *testing.T) {
 	}
 	defer restored.Close()
 	restoredInfo, _ := restored.Get(s.ID)
-	if restoredInfo.ID != s.ID || restoredInfo.NativeSessionID != s.NativeSessionID || restoredInfo.RuntimeID != s.RuntimeID || restoredInfo.Title != title || !restoredInfo.Archived {
+	if restoredInfo.ID != s.ID || restoredInfo.AgentSessionID != s.AgentSessionID || restoredInfo.RuntimeID != s.RuntimeID || restoredInfo.Title != title || !restoredInfo.Archived {
 		t.Fatalf("restored=%+v", restoredInfo)
 	}
 	archive = false
@@ -113,7 +113,7 @@ func TestConversationMetadataArchiveAndResumeKeepIdentity(t *testing.T) {
 	}
 	waitState(t, restored, s.ID, "ready")
 	resumed, _ := restored.Get(s.ID)
-	if resumed.ID != s.ID || resumed.RuntimeID == s.RuntimeID || resumed.NativeSessionID != s.NativeSessionID || resumed.Archived {
+	if resumed.ID != s.ID || resumed.RuntimeID == s.RuntimeID || resumed.AgentSessionID != s.AgentSessionID || resumed.Archived {
 		t.Fatalf("resumed=%+v", resumed)
 	}
 	if err = restored.CloseSession(s.ID); err != nil {
@@ -133,7 +133,7 @@ func TestInitialOpenFailureCanExplicitlyRetrySameConversation(t *testing.T) {
 	}
 	waitState(t, b, s.ID, "disconnected")
 	failed, _ := b.Get(s.ID)
-	if failed.NativeSessionID != "" {
+	if failed.AgentSessionID != "" {
 		t.Fatal("failed open fabricated native identity")
 	}
 	if err = b.Reconnect(s.ID); err != nil {
@@ -141,7 +141,7 @@ func TestInitialOpenFailureCanExplicitlyRetrySameConversation(t *testing.T) {
 	}
 	waitState(t, b, s.ID, "ready")
 	retried, _ := b.Get(s.ID)
-	if retried.ID != s.ID || retried.RuntimeID == failed.RuntimeID || retried.NativeSessionID == "" {
+	if retried.ID != s.ID || retried.RuntimeID == failed.RuntimeID || retried.AgentSessionID == "" {
 		t.Fatalf("retry=%+v", retried)
 	}
 	if err = b.receive(b.sessions[s.ID], Event{Kind: "notice", RuntimeID: failed.RuntimeID, Text: "stale old provider"}); !errors.Is(err, ErrStale) {

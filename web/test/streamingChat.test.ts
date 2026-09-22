@@ -1,14 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createHash, webcrypto } from 'node:crypto'
 import { isApprovalStale, APPROVAL_STALE_AFTER_MS } from '../src/approvalStaleness.js'
-import { optimisticTimelineItems, type NativeOptimisticMessage } from '../src/optimisticMessages.js'
-import { nativePromptTurnId } from '../src/promptIdentity.js'
+import { optimisticTimelineItems, type AgentOptimisticMessage } from '../src/optimisticMessages.js'
+import { agentPromptTurnId } from '../src/promptIdentity.js'
 import { isTimelinePinnedToBottom } from '../src/timelineState.js'
-import type { NativeItem } from '../src/state.js'
+import type { AgentItem } from '../src/state.js'
 
 afterEach(() => vi.unstubAllGlobals())
-const outgoing: NativeOptimisticMessage = { id: 'request-a', sessionId: 's', turnId: 'turn-a', text: 'same text', status: 'pending' }
-function canonical(turnId: string): NativeItem {
+const outgoing: AgentOptimisticMessage = { id: 'request-a', sessionId: 's', turnId: 'turn-a', text: 'same text', status: 'pending' }
+function canonical(turnId: string): AgentItem {
   return { key: JSON.stringify([turnId, 'user']), turnId, id: 'user', role: 'user', text: 'same text', title: '', status: 'submitted', truncated: false }
 }
 
@@ -16,7 +16,7 @@ describe('optimistic journal reconciliation', () => {
   it('uses the broker SHA-256 turn identity, including the NUL delimiter', async () => {
     vi.stubGlobal('crypto', webcrypto)
     const expected = `t_${createHash('sha256').update('session-a\0request-a').digest('hex').slice(0, 32)}`
-    expect(await nativePromptTurnId('session-a', 'request-a')).toBe(expected)
+    expect(await agentPromptTurnId('session-a', 'request-a')).toBe(expected)
   })
   it('shows pending immediately without a canonical message', () => {
     const row = optimisticTimelineItems('s', [], [outgoing], 'zh')[0]!

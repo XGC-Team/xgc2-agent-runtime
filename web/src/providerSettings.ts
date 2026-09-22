@@ -1,25 +1,25 @@
-import { PROVIDERS, decodeNativeTurnOptions, type NativeTurnOptions, type NativeProvider } from './state.js'
+import { PROVIDERS, decodeNativeTurnOptions, type AgentTurnOptions, type AgentProvider } from './state.js'
 
-export type NativeValueOption = { id: string; label: string }
-export type NativeModelOption = NativeValueOption & { efforts: NativeValueOption[]; defaultEffort?: string }
-export type NativePermissionOption = NativeValueOption & { description: string }
-export type NativeProviderConfiguration = {
+export type AgentValueOption = { id: string; label: string }
+export type AgentModelOption = AgentValueOption & { efforts: AgentValueOption[]; defaultEffort?: string }
+export type AgentPermissionOption = AgentValueOption & { description: string }
+export type AgentProviderConfiguration = {
   id: string
-  provider: NativeProvider
+  provider: AgentProvider
   enabled: boolean
   binaryPath: string
   available: boolean
   version: string
   detail?: string
   login: { status: 'unknown' | 'authenticated' | 'unauthenticated'; detail: string }
-  defaults: NativeTurnOptions
-  models: NativeModelOption[]
-  permissions: NativePermissionOption[]
+  defaults: AgentTurnOptions
+  models: AgentModelOption[]
+  permissions: AgentPermissionOption[]
 }
-export type NativeSettings = { revision: string; providers: NativeProviderConfiguration[] }
-export type NativeProviderSettingsUpdate = {
+export type AgentSettings = { revision: string; providers: AgentProviderConfiguration[] }
+export type AgentProviderSettingsUpdate = {
   revision: string
-  provider: Pick<NativeProviderConfiguration, 'id' | 'provider' | 'enabled' | 'defaults'> & { binaryPath?: string }
+  provider: Pick<AgentProviderConfiguration, 'id' | 'provider' | 'enabled' | 'defaults'> & { binaryPath?: string }
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -47,15 +47,15 @@ function unique<T extends { id: string }>(values: T[]): T[] {
   if (new Set(values.map(value => value.id)).size !== values.length) throw new Error('Duplicate provider setting identity.')
   return values
 }
-function option(value: unknown): NativeValueOption {
+function option(value: unknown): AgentValueOption {
   const row = record(value)
   return { id: id(row.id), label: text(row.label, 512) }
 }
-export function decodeNativeSettings(value: unknown): NativeSettings {
+export function decodeNativeSettings(value: unknown): AgentSettings {
   const settings = record(value)
   const providers = unique(array(settings.providers, value => {
     const row = record(value), login = record(row.login)
-    if (!PROVIDERS.includes(row.provider as NativeProvider)) throw new Error('Unknown native provider.')
+    if (!PROVIDERS.includes(row.provider as AgentProvider)) throw new Error('Unknown native provider.')
     if (!['unknown', 'authenticated', 'unauthenticated'].includes(String(login.status))) throw new Error('Unknown provider login state.')
     const models = unique(array(row.models, value => {
       const model = record(value)
@@ -66,9 +66,9 @@ export function decodeNativeSettings(value: unknown): NativeSettings {
     }, 2048))
     const permissions = unique(array(row.permissions, value => ({ ...option(value), description: text(record(value).description) }), 32))
     return {
-      id: id(row.id), provider: row.provider as NativeProvider, enabled: bool(row.enabled), binaryPath: text(row.binaryPath),
+      id: id(row.id), provider: row.provider as AgentProvider, enabled: bool(row.enabled), binaryPath: text(row.binaryPath),
       available: bool(row.available), version: text(row.version, 256), ...(row.detail === undefined ? {} : { detail: text(row.detail) }),
-      login: { status: login.status as NativeProviderConfiguration['login']['status'], detail: text(login.detail) },
+      login: { status: login.status as AgentProviderConfiguration['login']['status'], detail: text(login.detail) },
       defaults: decodeNativeTurnOptions(row.defaults), models, permissions,
     }
   }, 16))

@@ -180,7 +180,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   return (
     <Collapsible
       ref={panelRef}
-      data-xgc-role="native-agent-user-input"
+      data-xgc-role="agent-user-input"
       data-xgc-id={`${identity}:${prompt.requestId}`}
       open={!isCollapsed}
       onOpenChange={(open) => {
@@ -193,7 +193,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
           isCollapsed ? "Show the question and its options" : "Hide the question and its options"
         }
         data-pending-user-input-toggle={isCollapsed ? "collapsed" : "expanded"}
-        data-xgc-role="native-agent-question-disclosure" data-xgc-id={`${identity}:${prompt.requestId}:${activeQuestion.id}`}
+        data-xgc-role="agent-question-disclosure" data-xgc-id={`${identity}:${prompt.requestId}:${activeQuestion.id}`}
       >
         <ComposerBanner.Icon />
         <ComposerBanner.Content>
@@ -266,7 +266,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                   type="button"
                   disabled={!active || isResponding}
                   aria-pressed={isSelected}
-                  data-xgc-role="native-agent-question-option"
+                  data-xgc-role="agent-question-option"
                   data-xgc-id={`${identity}:${prompt.requestId}:${activeQuestion.id}:${optionValue}`}
                   onClick={() => {
                     handleOptionSelection(activeQuestion.id, optionValue);

@@ -1,6 +1,6 @@
 //go:build !unix
 
-package nativeagent
+package agentruntime
 
 import (
 	"context"

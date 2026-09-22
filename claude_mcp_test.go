@@ -1,4 +1,4 @@
-package nativeagent
+package agentruntime
 
 import (
 	"bufio"
@@ -104,15 +104,15 @@ func fixtureClaudeMCP() {
 func TestClaudeLocalMCPFreshAndResumeNativeContracts(t *testing.T) {
 	for _, scenario := range []struct {
 		name       string
-		options    NativeOptions
+		options    AgentOptions
 		answer     string
 		permission string
 	}{
-		{"legacy-narrow", NativeOptions{}, "allow", ""},
-		{"manual", NativeOptions{Permission: "approval-required"}, "deny", ""},
-		{"accept-edits", NativeOptions{Permission: "auto-accept-edits"}, "allow", "--permission-mode=acceptEdits"},
-		{"full-access", NativeOptions{Permission: "full-access"}, "allow", "--permission-mode=bypassPermissions"},
-		{"plan", NativeOptions{Permission: "plan"}, "deny", "--permission-mode=plan"},
+		{"legacy-narrow", AgentOptions{}, "allow", ""},
+		{"manual", AgentOptions{Permission: "approval-required"}, "deny", ""},
+		{"accept-edits", AgentOptions{Permission: "auto-accept-edits"}, "allow", "--permission-mode=acceptEdits"},
+		{"full-access", AgentOptions{Permission: "full-access"}, "allow", "--permission-mode=bypassPermissions"},
+		{"plan", AgentOptions{Permission: "plan"}, "deny", "--permission-mode=plan"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			previousPath := ""
@@ -136,7 +136,7 @@ func TestClaudeLocalMCPFreshAndResumeNativeContracts(t *testing.T) {
 				if err = driver.Open(context.Background(), t.TempDir(), native); err != nil {
 					t.Fatal(err)
 				}
-				if scenario.options == (NativeOptions{}) {
+				if scenario.options == (AgentOptions{}) {
 					err = driver.Prompt(context.Background(), "turn", "inspect the experiment")
 				} else {
 					err = driver.(optionDriver).PromptWithOptions(context.Background(), "turn", "inspect the experiment", scenario.options)
@@ -185,7 +185,7 @@ func TestClaudeLocalMCPFreshAndResumeNativeContracts(t *testing.T) {
 					t.Fatal("MCP injection changed bypass permission authority")
 				}
 				toolsIndex := slices.Index(report.Args, "--tools")
-				if scenario.options == (NativeOptions{}) {
+				if scenario.options == (AgentOptions{}) {
 					if toolsIndex < 0 || report.Args[toolsIndex+1] != "Read,Glob,Grep" || !slices.Contains(report.Args, "--allowedTools") {
 						t.Fatal("legacy MCP launch expanded built-in tools")
 					}
@@ -218,7 +218,7 @@ func TestClaudeLocalMCPUnsupportedCLIAndFailedStartCleanup(t *testing.T) {
 	temporary := t.TempDir()
 	t.Setenv("TMPDIR", temporary)
 	driver := &claudeDriver{profile: Profile{Provider: "claude", Executable: filepath.Join(t.TempDir(), "missing")}}
-	err := driver.PromptWithOptions(withLocalMCP(context.Background(), testLocalMCP()), "turn", "unused", NativeOptions{Permission: "approval-required"})
+	err := driver.PromptWithOptions(withLocalMCP(context.Background(), testLocalMCP()), "turn", "unused", AgentOptions{Permission: "approval-required"})
 	if err == nil {
 		t.Fatal("missing native process unexpectedly started")
 	}

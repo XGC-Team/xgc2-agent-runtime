@@ -1,4 +1,4 @@
-package nativeagent
+package agentruntime
 
 import (
 	"bufio"
@@ -164,7 +164,7 @@ func testProfile(t *testing.T, provider string) Profile {
 	return Profile{ID: provider, Provider: provider, Executable: path, SHA256: hex.EncodeToString(sum[:]), ReviewedVersion: "protocol-fixture-only", BillingReviewed: true}
 }
 func scope(profile string) Create {
-	return Create{ProfileID: profile, Context: ContextRef{Kind: "fixture", ID: "project"}, Workspace: WorkspaceRef{ID: "workspace", Revision: strings.Repeat("a", 40)}, NativeAccessConfirmed: true}
+	return Create{ProfileID: profile, Context: ContextRef{Kind: "fixture", ID: "project"}, Workspace: WorkspaceRef{ID: "workspace", Revision: strings.Repeat("a", 40)}, AgentAccessConfirmed: true}
 }
 func testBroker(t *testing.T, provider string) (*Broker, Session) {
 	t.Helper()
@@ -389,7 +389,7 @@ func TestJournalRestartReplaysWithoutPromptResend(t *testing.T) {
 	waitState(t, recovered, s.ID, "ready")
 }
 func TestConfigAndEnvironmentNeverAcceptCredentials(t *testing.T) {
-	got := NativeEnvironment([]string{"HOME=/private/home", "PATH=/bin", "OPENAI_API_KEY=secret", "ANTHROPIC_AUTH_TOKEN=secret", "XAI_API_KEY=secret", "CURSOR_API_KEY=secret", "CODEX_HOME=/other", "RESEARCH_OS_SECRET=secret"})
+	got := AgentEnvironment([]string{"HOME=/private/home", "PATH=/bin", "OPENAI_API_KEY=secret", "ANTHROPIC_AUTH_TOKEN=secret", "XAI_API_KEY=secret", "CURSOR_API_KEY=secret", "CODEX_HOME=/other", "RESEARCH_OS_SECRET=secret"})
 	if len(got) != 2 {
 		t.Fatalf("environment=%v", got)
 	}
@@ -487,24 +487,24 @@ func TestClaudeFinalSnapshotAndPermissionDenial(t *testing.T) {
 func TestLoopbackOriginBodyAndEventCursorGuards(t *testing.T) {
 	b, _ := testBroker(t, "claude")
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, b, "/api/v1/native-agents")
+	RegisterRoutes(mux, b, "/api/v1/agent-runtime")
 	req := func(method, path, origin, remote, body string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, "http://127.0.0.1:3200"+path, strings.NewReader(body))
 		r.RemoteAddr = remote
 		r.Header.Set("Origin", origin)
 		r.Header.Set("Content-Type", "application/json")
-		r.Header.Set("X-XGC-Native-Client", "1")
+		r.Header.Set("X-XGC-Agent-Client", "1")
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, r)
 		return w
 	}
-	if w := req("GET", "/api/v1/native-agents/providers", "http://evil.example", "127.0.0.1:5", ""); w.Code != 403 {
+	if w := req("GET", "/api/v1/agent-runtime/providers", "http://evil.example", "127.0.0.1:5", ""); w.Code != 403 {
 		t.Fatal("cross-origin read accepted")
 	}
-	if w := req("GET", "/api/v1/native-agents/providers", "", "10.0.0.1:5", ""); w.Code != 403 {
+	if w := req("GET", "/api/v1/agent-runtime/providers", "", "10.0.0.1:5", ""); w.Code != 403 {
 		t.Fatal("remote accepted")
 	}
-	if w := req("POST", "/api/v1/native-agents/sessions", "http://127.0.0.1:3200", "127.0.0.1:5", `{"executable":"/bin/sh"}`); w.Code != 400 {
+	if w := req("POST", "/api/v1/agent-runtime/sessions", "http://127.0.0.1:3200", "127.0.0.1:5", `{"executable":"/bin/sh"}`); w.Code != 400 {
 		t.Fatal("arbitrary command input accepted")
 	}
 	r := httptest.NewRequest("GET", "http://localhost/events?after=3", nil)
@@ -534,10 +534,10 @@ func TestSSEDisconnectDoesNotCancelWorker(t *testing.T) {
 	_, _ = b.Prompt(s.ID, "p1", "hello")
 	waitRequest(t, b, s.ID)
 	ctx, cancel := context.WithCancel(context.Background())
-	r := httptest.NewRequest("GET", "http://127.0.0.1:3200/api/v1/native-agents/sessions/"+s.ID+"/events?after=0", nil).WithContext(ctx)
+	r := httptest.NewRequest("GET", "http://127.0.0.1:3200/api/v1/agent-runtime/sessions/"+s.ID+"/events?after=0", nil).WithContext(ctx)
 	r.RemoteAddr = "127.0.0.1:5"
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, b, "/api/v1/native-agents")
+	RegisterRoutes(mux, b, "/api/v1/agent-runtime")
 	w := httptest.NewRecorder()
 	done := make(chan struct{})
 	go func() { mux.ServeHTTP(w, r); close(done) }()

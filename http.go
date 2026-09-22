@@ -1,4 +1,4 @@
-package nativeagent
+package agentruntime
 
 import (
 	"encoding/json"
@@ -19,20 +19,20 @@ import (
 // establish no trust; remote ingress requires a separate authenticated design.
 var routeBase = regexp.MustCompile(`^/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+$`)
 
-const ClientHeader = "X-XGC-Native-Client"
+const ClientHeader = "X-XGC-Agent-Client"
 
 // RegisterRoutes mounts one broker at a product-selected same-origin API root.
 func RegisterRoutes(mux *http.ServeMux, b *Broker, basePath string) error {
 	basePath = strings.TrimSuffix(basePath, "/")
 	if !routeBase.MatchString(basePath) {
-		return errors.New("invalid native-agent route base")
+		return errors.New("invalid agent runtime route base")
 	}
 	register := func(pattern string, h http.HandlerFunc) {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Cache-Control", "no-store")
 			w.Header().Set("X-Content-Type-Options", "nosniff")
 			if !localRequest(r) {
-				writeFailure(w, http.StatusForbidden, "local_only", "native agents require same-origin loopback access")
+				writeFailure(w, http.StatusForbidden, "local_only", "agent runtime requires same-origin loopback access")
 				return
 			}
 			h(w, r)
@@ -162,8 +162,8 @@ func RegisterRoutes(mux *http.ServeMux, b *Broker, basePath string) error {
 	})
 	register("POST "+basePath+"/sessions/{id}/prompts", func(w http.ResponseWriter, r *http.Request) {
 		var c struct {
-			Text    string        `json:"text"`
-			Options NativeOptions `json:"options,omitempty"`
+			Text    string       `json:"text"`
+			Options AgentOptions `json:"options,omitempty"`
 		}
 		if !decodeBody(w, r, &c) {
 			return

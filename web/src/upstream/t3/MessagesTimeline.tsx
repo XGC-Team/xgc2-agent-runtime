@@ -10,9 +10,9 @@ import { ChatMarkdown } from './ChatMarkdown.js';
 import { MessageCopyButton } from './MessageCopyButton.js';
 import { cn } from './utils.js';
 import type { TimelineItem, TimelineMessage, TimelineWork } from './types.js';
-import { NativeToolImages } from '../../NativeToolImages.js';
-import { NativeTimelineStateProvider, useNativeTimelineState, useTimelineDisclosure,
-  isTimelinePinnedToBottom, type NativeTimelineState } from '../../timelineState.js';
+import { AgentToolImages } from '../../AgentToolImages.js';
+import { AgentTimelineStateProvider, useNativeTimelineState, useTimelineDisclosure,
+  isTimelinePinnedToBottom, type AgentTimelineState } from '../../timelineState.js';
 
 const TIMELINE_MAINTAIN_VISIBLE = { data: true, size: true } as const;
 // Streamed text lands a paragraph at a time. A smooth scroll to the end turns
@@ -41,7 +41,7 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody({ te
       style={isCollapsed ? { WebkitMaskImage: COLLAPSED_USER_MESSAGE_FADE_MASK, maskImage: COLLAPSED_USER_MESSAGE_FADE_MASK } : undefined}
     ><ChatMarkdown text={text} /></div> : null}
     {canCollapse ? <div className="mt-1.5 flex items-center gap-2 justify-end" data-user-message-footer="true">
-      <Button type="button" size="xs" variant="ghost" aria-expanded={expanded} data-scroll-anchor-ignore data-xgc-role="native-agent-message-disclosure" data-xgc-id={`${identity}:${messageId}`}
+      <Button type="button" size="xs" variant="ghost" aria-expanded={expanded} data-scroll-anchor-ignore data-xgc-role="agent-message-disclosure" data-xgc-id={`${identity}:${messageId}`}
         onClick={toggleExpanded}
         className="-ml-1 h-6 rounded-md px-1.5 text-secondary-label text-xs hover:bg-muted/55 hover:text-message-foreground"
       >{expanded ? 'Show less' : 'Show full message'}</Button>
@@ -61,7 +61,7 @@ function MessageRetry({ retry, identity }: { retry: NonNullable<TimelineMessage[
   const [error, setError] = useState('');
   return <>
     <Button type="button" size="xs" variant="ghost" disabled={busy}
-      data-xgc-role="native-agent-message-retry" data-xgc-id={identity}
+      data-xgc-role="agent-message-retry" data-xgc-id={identity}
       onClick={() => {
         if (busy) return;
         setBusy(true); setError('');
@@ -77,7 +77,7 @@ function UserTimelineRow({ message }: { message: TimelineMessage }) {
       <CollapsibleUserMessageBody text={message.text} messageId={message.id} /><TruncationNotice item={message} />
     </div>
     <div className="flex min-h-6 w-full max-w-[80%] items-center justify-end pe-1 text-xs tabular-nums">
-      <div className="flex shrink-0 items-center gap-2">{message.delivery ? <span title={message.delivery.detail} data-xgc-role="native-agent-message-delivery" data-xgc-id={message.id} data-state={message.delivery.state}>{message.delivery.label}</span> : null}
+      <div className="flex shrink-0 items-center gap-2">{message.delivery ? <span title={message.delivery.detail} data-xgc-role="agent-message-delivery" data-xgc-id={message.id} data-state={message.delivery.state}>{message.delivery.label}</span> : null}
         {message.retry ? <MessageRetry retry={message.retry} identity={message.id} /> : null}
         <MessageTimestamp value={message.createdAt} />{message.text ? <MessageCopyButton text={message.text} identityId={message.id} /> : null}</div>
     </div>
@@ -122,7 +122,7 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow({ workEntry }: { workE
   const warning = workEntry.tone === 'warning';
   const stopRowToggle = (event: { stopPropagation: () => void }) => event.stopPropagation();
   return <div className={cn('flex flex-col rounded-md px-0.5 transition-colors py-0.5', canExpand && 'cursor-pointer hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70')}
-    {...(canExpand ? { role: 'button', tabIndex: 0, 'data-xgc-role': 'native-agent-tool-disclosure', 'data-xgc-id': `${identity}:${workEntry.id}`, 'aria-label': workEntry.title, 'aria-expanded': expanded,
+    {...(canExpand ? { role: 'button', tabIndex: 0, 'data-xgc-role': 'agent-tool-disclosure', 'data-xgc-id': `${identity}:${workEntry.id}`, 'aria-label': workEntry.title, 'aria-expanded': expanded,
       onClick: toggleExpanded, onKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggleExpanded(); } } } : {})}
   >
     <div className="flex select-none items-center gap-1.5 transition-[opacity,translate] duration-200">
@@ -144,12 +144,12 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow({ workEntry }: { workE
       <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-foreground/80">{body}</pre>
     </div> : null}
     <TruncationNotice item={workEntry} />
-    {workEntry.toolData?.images?.length ? <NativeToolImages images={workEntry.toolData.images} identity={`${identity}:${workEntry.id}`} /> : null}
+    {workEntry.toolData?.images?.length ? <AgentToolImages images={workEntry.toolData.images} identity={`${identity}:${workEntry.id}`} /> : null}
   </div>;
 });
 
 const TimelineRow = memo(function TimelineRow({ item, identity }: { item: TimelineItem; identity: string }) {
-  return <div className="mx-auto w-full min-w-0 max-w-3xl overflow-x-clip py-2" data-timeline-root="true" data-xgc-role="native-agent-item" data-xgc-id={`${identity}:${item.id}`}>
+  return <div className="mx-auto w-full min-w-0 max-w-3xl overflow-x-clip py-2" data-timeline-root="true" data-xgc-role="agent-item" data-xgc-id={`${identity}:${item.id}`}>
     {item.kind === 'custom' ? item.content : item.kind === 'message' ? item.role === 'user' ? <UserTimelineRow message={item} /> : <AssistantTimelineRow message={item} /> : item.kind === 'work' ? <section className="-mx-1 space-y-0.5 px-1 py-0.5" aria-label="Activity"><PlainWorkEntryRow workEntry={item} /></section> : <div className="relative min-w-0 px-1 py-0.5"><ChatMarkdown text={item.text} /><TruncationNotice item={item} /></div>}
   </div>;
 }, (previous, next) => {
@@ -164,9 +164,9 @@ const TimelineRow = memo(function TimelineRow({ item, identity }: { item: Timeli
     && a.optimistic === b.optimistic && a.delivery === b.delivery && a.retry === b.retry;
 });
 type MessagesTimelineProps = { items: readonly TimelineItem[]; active: boolean; emptyState?: ReactNode;
-  timelineState?: NativeTimelineState; onTimelineStateChange?: (state: NativeTimelineState) => void };
+  timelineState?: AgentTimelineState; onTimelineStateChange?: (state: AgentTimelineState) => void };
 export const MessagesTimeline = memo(function MessagesTimeline({ timelineState, onTimelineStateChange, ...props }: MessagesTimelineProps) {
-  return <NativeTimelineStateProvider state={timelineState} onChange={onTimelineStateChange}><VirtualTimeline {...props} /></NativeTimelineStateProvider>;
+  return <AgentTimelineStateProvider state={timelineState} onChange={onTimelineStateChange}><VirtualTimeline {...props} /></AgentTimelineStateProvider>;
 });
 function VirtualTimeline({ items, active, emptyState }: Omit<MessagesTimelineProps, 'timelineState' | 'onTimelineStateChange'>) {
   const identity = useT3Identity();

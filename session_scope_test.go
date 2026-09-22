@@ -1,4 +1,4 @@
-package nativeagent
+package agentruntime
 
 import (
 	"context"
@@ -41,7 +41,7 @@ func (d *scopedFixtureDriver) Open(_ context.Context, _ string, native string) e
 		return errors.New("opened without exact session scope")
 	}
 	d.opened <- scopeReceipt{scope: d.scope, id: d.id, native: native}
-	return d.sink(Event{Kind: "session.identity", NativeSessionID: "native-retained"})
+	return d.sink(Event{Kind: "session.identity", AgentSessionID: "native-retained"})
 }
 func (d *scopedFixtureDriver) Prompt(context.Context, string, string) error {
 	return errors.New("unexpected prompt replay")
@@ -87,7 +87,7 @@ func TestBrokerBindsPersistedScopeBeforeOpenAndOnResume(t *testing.T) {
 	profile := scopeProfile(t)
 	root := scopePrivateDirectory(t)
 	workspace := t.TempDir()
-	scope := Create{ProfileID: profile.ID, Context: ContextRef{Kind: "experiment", ID: "experiment-a"}, Workspace: WorkspaceRef{ID: "workspace", Revision: "reviewed-v1"}, NativeAccessConfirmed: true}
+	scope := Create{ProfileID: profile.ID, Context: ContextRef{Kind: "experiment", ID: "experiment-a"}, Workspace: WorkspaceRef{ID: "workspace", Revision: "reviewed-v1"}, AgentAccessConfirmed: true}
 	bound := make(chan scopeReceipt, 4)
 	opened := make(chan scopeReceipt, 4)
 	closed := make(chan struct{})
@@ -166,7 +166,7 @@ func TestRejectedSessionBindingNeverOpensAndIsClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer broker.Close()
-	session, err := broker.Create(context.Background(), "key", Create{ProfileID: profile.ID, Context: ContextRef{Kind: "experiment", ID: "experiment"}, Workspace: WorkspaceRef{ID: "workspace", Revision: "v1"}, NativeAccessConfirmed: true})
+	session, err := broker.Create(context.Background(), "key", Create{ProfileID: profile.ID, Context: ContextRef{Kind: "experiment", ID: "experiment"}, Workspace: WorkspaceRef{ID: "workspace", Revision: "v1"}, AgentAccessConfirmed: true})
 	if err != nil {
 		t.Fatal(err)
 	}

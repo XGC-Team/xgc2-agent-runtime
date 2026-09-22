@@ -1,4 +1,4 @@
-package nativeagent
+package agentruntime
 
 import (
 	"bytes"
@@ -27,7 +27,7 @@ func promptReplayFixture(t *testing.T) []Event {
 func TestPromptReceiptDetailsHaveCanonicalTypeAndPreserveOptions(t *testing.T) {
 	legacy := promptReplayFixture(t)[2]
 	selected := optionsFromDetails(legacy.Details)
-	if selected != (NativeOptions{Model: "gpt-5.3-codex-spark", Effort: "high"}) {
+	if selected != (AgentOptions{Model: "gpt-5.3-codex-spark", Effort: "high"}) {
 		t.Fatal("shared fixture lost the original options shape")
 	}
 	legacy.Details["type"] = "userMessage"
@@ -43,7 +43,7 @@ func TestPromptReceiptDetailsHaveCanonicalTypeAndPreserveOptions(t *testing.T) {
 	if err = json.Unmarshal(encoded, &decoded); err != nil || optionsFromDetails(decoded) != selected {
 		t.Fatalf("serialized receipt lost idempotency selections: %s %v", encoded, err)
 	}
-	if promptDetails(NativeOptions{}) != nil {
+	if promptDetails(AgentOptions{}) != nil {
 		t.Fatal("a prompt without selections acquired invented metadata")
 	}
 }
@@ -112,7 +112,7 @@ func TestPersistedPromptOptionsReplayKeepsJournalAndIdempotency(t *testing.T) {
 			if _, err := broker.PromptWithOptions(id, key, "Changed fixture prompt", selected); !errors.Is(err, ErrConflict) {
 				t.Fatalf("changed text did not conflict: %v", err)
 			}
-			if _, err := broker.PromptWithOptions(id, key, events[2].Text, NativeOptions{}); !errors.Is(err, ErrConflict) {
+			if _, err := broker.PromptWithOptions(id, key, events[2].Text, AgentOptions{}); !errors.Is(err, ErrConflict) {
 				t.Fatalf("dropped selections did not conflict: %v", err)
 			}
 			after, _, _ := broker.Replay(id, 0)

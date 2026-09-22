@@ -1,4 +1,4 @@
-package nativeagent
+package agentruntime
 
 // ACP discovery/configuration is adapted from the fixed T3 Code provider
 // adapters (GrokAcpSupport, CursorProvider, CursorAdapter), not Codex aliases.
@@ -230,8 +230,8 @@ func inspectACP(ctx context.Context, p Profile, result *ProviderSetting) {
 	}
 	result.Detail = "Models and modes were read from the native ACP interface; no prompt was sent."
 }
-func (d *rpcDriver) applyACPOptions(ctx context.Context, o NativeOptions) error {
-	if o == (NativeOptions{}) {
+func (d *rpcDriver) applyACPOptions(ctx context.Context, o AgentOptions) error {
+	if o == (AgentOptions{}) {
 		return nil
 	}
 	d.mu.Lock()

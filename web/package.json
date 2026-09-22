@@ -37,7 +37,7 @@
       "types": "./dist/react.d.ts",
       "import": "./dist/react.js"
     },
-    "./styles.css": "./dist/native-chat.css"
+    "./styles.css": "./dist/agent-chat.css"
   },
   "files": [
     "dist",
@@ -48,7 +48,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && npm run build:styles",
-    "build:styles": "tailwindcss -i src/t3-theme.css -o dist/native-chat.unscoped.css && node scripts/scope-styles.mjs",
+    "build:styles": "tailwindcss -i src/t3-theme.css -o dist/agent-chat.unscoped.css && node scripts/scope-styles.mjs",
     "test": "npm run build && vitest run && node --test test/*.test.mjs",
     "lint": "eslint src test scripts",
     "prepack": "npm run build"

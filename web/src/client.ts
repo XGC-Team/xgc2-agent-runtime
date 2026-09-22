@@ -1,10 +1,10 @@
-import { decodeNativeSettings, type NativeProviderSettingsUpdate } from './providerSettings.js'
+import { decodeNativeSettings, type AgentProviderSettingsUpdate } from './providerSettings.js'
 import { decodeDecisionFacts } from './decisionPolicy.js'
 export { decodeDecisionFacts, type DecisionFacts } from './decisionPolicy.js'
-import { decodePromptQueue, decodeProfiles, decodeSession, decodeSessions, decodeNativeRequest, type NativeAnswer, type NativeTurnOptions, type Scope } from './state.js'
+import { decodePromptQueue, decodeProfiles, decodeSession, decodeSessions, decodeNativeRequest, type AgentAnswer, type AgentTurnOptions, type Scope } from './state.js'
 
-export type NativeSessionListOptions = { after?: string; limit?: number }
-export type NativeSessionMetadataUpdate = { expectedRevision: number; title?: string; archived?: boolean }
+export type AgentSessionListOptions = { after?: string; limit?: number }
+export type AgentSessionMetadataUpdate = { expectedRevision: number; title?: string; archived?: boolean }
 
 function decodeSessionPage(value: unknown) {
   const page = record(value)
@@ -21,32 +21,32 @@ function decodeInputs(value: unknown) {
   })
 }
 
-export const NATIVE_CLIENT_HEADER = 'X-XGC-Native-Client'
-export type NativeClientOptions = { basePath: string; fetch?: typeof globalThis.fetch }
+export const AGENT_CLIENT_HEADER = 'X-XGC-Agent-Client'
+export type AgentClientOptions = { basePath: string; fetch?: typeof globalThis.fetch }
 
-export class NativeAgentClientError extends Error {
+export class AgentClientError extends Error {
   readonly status: number
   readonly code: string
   constructor(status: number, code: string, message: string) {
     super(message)
-    this.name = 'NativeAgentClientError'
+    this.name = 'AgentClientError'
     this.status = status
     this.code = code
   }
 }
 
 function record(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('原生操作缺少响应。')
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('操作缺少响应。')
   return value as Record<string, unknown>
 }
 
 export function nativeAgentBasePath(value: string): string {
   const path = value.replace(/\/$/, '')
-  if (!/^\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+$/.test(path)) throw new Error('原生客户端需要同源 API 根路径。')
+  if (!/^\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+$/.test(path)) throw new Error('客户端需要同源 API 根路径。')
   return path
 }
 
-export function createNativeAgentClient(options: NativeClientOptions) {
+export function createAgentClient(options: AgentClientOptions) {
   const root = nativeAgentBasePath(options.basePath)
   const fetcher = options.fetch ?? ((...args) => globalThis.fetch(...args))
   async function request<T>(path: string, decode: (value: unknown) => T, init?: RequestInit): Promise<T> {
@@ -55,17 +55,17 @@ export function createNativeAgentClient(options: NativeClientOptions) {
     const envelope = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload as Record<string, unknown> : undefined
     if (!response.ok) {
       const error = envelope?.error && typeof envelope.error === 'object' ? envelope.error as Record<string, unknown> : undefined
-      throw new NativeAgentClientError(response.status, typeof error?.code === 'string' ? error.code : `http_${response.status}`,
-        typeof error?.message === 'string' ? error.message : `原生请求失败（HTTP ${response.status}）。`)
+      throw new AgentClientError(response.status, typeof error?.code === 'string' ? error.code : `http_${response.status}`,
+        typeof error?.message === 'string' ? error.message : `请求失败（HTTP ${response.status}）。`)
     }
-    if (!envelope || !Object.prototype.hasOwnProperty.call(envelope, 'data')) throw new NativeAgentClientError(502, 'invalid_response', '原生响应缺少 data envelope。')
+    if (!envelope || !Object.prototype.hasOwnProperty.call(envelope, 'data')) throw new AgentClientError(502, 'invalid_response', '响应缺少 data envelope。')
     return decode(envelope.data)
   }
   function post(body: unknown, key?: string): RequestInit {
-    return { method: 'POST', headers: { 'Content-Type': 'application/json', [NATIVE_CLIENT_HEADER]: '1', ...(key ? { 'Idempotency-Key': key } : {}) }, body: JSON.stringify(body) }
+    return { method: 'POST', headers: { 'Content-Type': 'application/json', [AGENT_CLIENT_HEADER]: '1', ...(key ? { 'Idempotency-Key': key } : {}) }, body: JSON.stringify(body) }
   }
   const sessionPath = (id: string) => `/sessions/${encodeURIComponent(id)}`
-  const getNativeSessionPage = (signal?: AbortSignal, options: NativeSessionListOptions = {}) => {
+  const getNativeSessionPage = (signal?: AbortSignal, options: AgentSessionListOptions = {}) => {
     const query = new URLSearchParams()
     if (options.after) query.set('after', options.after)
     if (options.limit !== undefined) query.set('limit', String(options.limit))
@@ -74,7 +74,7 @@ export function createNativeAgentClient(options: NativeClientOptions) {
   return {
     basePath: root,
     getNativeSettings: (signal?: AbortSignal) => request('/settings', decodeNativeSettings, { signal }),
-    updateNativeSettings: (update: NativeProviderSettingsUpdate) => request('/settings', decodeNativeSettings, post(update)),
+    updateNativeSettings: (update: AgentProviderSettingsUpdate) => request('/settings', decodeNativeSettings, post(update)),
     refreshNativeSettings: (id: string) => request('/settings/refresh', decodeNativeSettings, post({ id })),
     getNativeProfiles: (signal?: AbortSignal) => request('/providers', decodeProfiles, { signal }),
     getNativeSessionPage,
@@ -96,31 +96,31 @@ export function createNativeAgentClient(options: NativeClientOptions) {
     getNativeSession: (id: string, signal?: AbortSignal) => request(sessionPath(id), decodeSession, { signal }),
     getNativeInputs: (id: string, signal?: AbortSignal) => request(`${sessionPath(id)}/inputs`, decodeInputs, { signal }),
     evaluateNativeInputs: (id:string) => request(`${sessionPath(id)}/evaluate-inputs`,record,post({})),
-    updateNativeSession: (id: string, update: NativeSessionMetadataUpdate) => request(`${sessionPath(id)}/metadata`, decodeSession, post(update)),
+    updateNativeSession: (id: string, update: AgentSessionMetadataUpdate) => request(`${sessionPath(id)}/metadata`, decodeSession, post(update)),
     createNativeSession: (scope: Scope, key: string) => request('/sessions', (value) => {
       const session = decodeSession(value)
-      if (session.scope.profileId !== scope.profileId || session.scope.nativeAccessConfirmed !== scope.nativeAccessConfirmed
+      if (session.scope.profileId !== scope.profileId || session.scope.accessConfirmed !== scope.accessConfirmed
         || session.scope.context.kind !== scope.context.kind || session.scope.context.id !== scope.context.id
         || session.scope.workspace.id !== scope.workspace.id || session.scope.workspace.revision !== scope.workspace.revision) {
         throw new Error('创建响应的会话范围不匹配。')
       }
       const expectedOptions = scope.options
-      if (['model', 'effort', 'permission'].some(key => session.scope.options?.[key as keyof NativeTurnOptions] !== expectedOptions?.[key as keyof NativeTurnOptions])) {
+      if (['model', 'effort', 'permission'].some(key => session.scope.options?.[key as keyof AgentTurnOptions] !== expectedOptions?.[key as keyof AgentTurnOptions])) {
         throw new Error('Native session options do not match the request.')
       }
       return session
     }, post(scope, key)),
-    updateNativePromptQueue: (id: string, command: {operation: 'enqueue' | 'edit' | 'remove' | 'reorder' | 'pause' | 'resume'; expectedRevision?: number; id?: string; text?: string; options?: NativeTurnOptions; order?: string[]}, key: string) => request(`${sessionPath(id)}/queue`, decodePromptQueue, post(command, key)),
-    sendNativePrompt: (id: string, text: string, key: string, options?: NativeTurnOptions) => request(`${sessionPath(id)}/prompts`, (value) => {
+    updateNativePromptQueue: (id: string, command: {operation: 'enqueue' | 'edit' | 'remove' | 'reorder' | 'pause' | 'resume'; expectedRevision?: number; id?: string; text?: string; options?: AgentTurnOptions; order?: string[]}, key: string) => request(`${sessionPath(id)}/queue`, decodePromptQueue, post(command, key)),
+    sendNativePrompt: (id: string, text: string, key: string, options?: AgentTurnOptions) => request(`${sessionPath(id)}/prompts`, (value) => {
       const result = record(value)
-      if (typeof result.turnId !== 'string' || !/^t_[a-f0-9]{32}$/.test(result.turnId)) throw new Error('原生任务缺少稳定轮次标识。')
+      if (typeof result.turnId !== 'string' || !/^t_[a-f0-9]{32}$/.test(result.turnId)) throw new Error('任务缺少稳定轮次标识。')
       return result.turnId
     }, post({ text, ...(options ? { options } : {}) }, key)),
-    answerNativeRequest: (id: string, requestId: string, answer: NativeAnswer) => request(`${sessionPath(id)}/inputs/${encodeURIComponent(requestId)}`, record, post(answer)),
+    answerNativeRequest: (id: string, requestId: string, answer: AgentAnswer) => request(`${sessionPath(id)}/inputs/${encodeURIComponent(requestId)}`, record, post(answer)),
     cancelNativeTurn: (id: string) => request(`${sessionPath(id)}/cancel`, record, post({})),
     reconnectNativeSession: (id: string) => request(`${sessionPath(id)}/reconnect`, record, post({})),
     closeNativeSession: (id: string) => request(`${sessionPath(id)}/close`, record, post({})),
   }
 }
 
-export type NativeAgentClient = ReturnType<typeof createNativeAgentClient>
+export type AgentClient = ReturnType<typeof createAgentClient>

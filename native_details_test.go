@@ -1,4 +1,4 @@
-package nativeagent
+package agentruntime
 
 import (
 	"context"
@@ -20,7 +20,7 @@ func TestCodexStructuredToolDetailsAndNativeIdentity(t *testing.T) {
 		t.Fatal(events)
 	}
 	event := events[0]
-	if event.TurnID != "local-turn" || event.NativeTurnID != "native-turn" || event.NativeThreadID != "native-thread" || event.SourceMethod != "item/completed" {
+	if event.TurnID != "local-turn" || event.AgentTurnID != "native-turn" || event.AgentThreadID != "native-thread" || event.SourceMethod != "item/completed" {
 		t.Fatalf("identity: %+v", event)
 	}
 	if event.Details["cwd"] != "/reviewed/workspace" || event.Details["exitCode"] != float64(2) || event.Details["durationMs"] != float64(17) || event.Text != "no matches" {
@@ -66,7 +66,7 @@ func TestCodexApprovalKeepsSourceAndQuestionSemanticsWithoutWideningAuthority(t 
 	if _, err := d.onRequest(context.Background(), "item/commandExecution/requestApproval", params); err != nil {
 		t.Fatal(err)
 	}
-	if seen.NativeItemID != "tool-one" || seen.NativeTurnID != "native-turn" || seen.NativeThreadID != "native-thread" || seen.SourceMethod != "item/commandExecution/requestApproval" || seen.Details.Cwd != "/reviewed/workspace" {
+	if seen.AgentItemID != "tool-one" || seen.AgentTurnID != "native-turn" || seen.AgentThreadID != "native-thread" || seen.SourceMethod != "item/commandExecution/requestApproval" || seen.Details.Cwd != "/reviewed/workspace" {
 		t.Fatalf("request: %+v", seen)
 	}
 	if len(seen.Options) != 2 || seen.ValidateAnswer(Answer{OptionID: "acceptForSession"}) == nil {

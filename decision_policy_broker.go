@@ -1,4 +1,4 @@
-package nativeagent
+package agentruntime
 
 import (
 	"context"
@@ -28,12 +28,12 @@ func (b *Broker) SetDecisionEvaluator(evaluate DecisionEvaluator) error {
 	return nil
 }
 
-// NativeDecisionFacts recognizes only adapter-owned structured command/network
+// AgentDecisionFacts recognizes only adapter-owned structured command/network
 // fields with known permission protocols. File previews and arbitrary ACP tool
 // labels are not complete admission inputs; they stay manual until their owner
 // supplies an exact structured adapter. No prompt, title or permission option
 // (including full-access) can identify a ground-station effect.
-func NativeDecisionFacts(session Session, request Request) (DecisionFacts, bool) {
+func AgentDecisionFacts(session Session, request Request) (DecisionFacts, bool) {
 	return nativeDecisionFacts(session, request, "")
 }
 

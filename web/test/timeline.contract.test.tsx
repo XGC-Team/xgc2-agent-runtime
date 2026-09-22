@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { TimelineItem } from '../src/upstream/t3/types.js'
-import { EMPTY_NATIVE_TIMELINE_STATE, NativeTimelineStateProvider, useTimelineDisclosure } from '../src/timelineState.js'
+import { EMPTY_NATIVE_TIMELINE_STATE, AgentTimelineStateProvider, useTimelineDisclosure } from '../src/timelineState.js'
 import { MessagesTimeline } from '../src/upstream/t3/MessagesTimeline.js'
 
 // This probe tests the shared virtualizer contract, NOT rendering performance.
@@ -54,10 +54,10 @@ describe('one shared LegendList for the complete timeline', () => {
       const [expanded, toggle] = useTimelineDisclosure('long-user-message')
       return <button onClick={toggle} aria-expanded={expanded}>Disclosure</button>
     }
-    const view = render(<NativeTimelineStateProvider><Row /></NativeTimelineStateProvider>)
+    const view = render(<AgentTimelineStateProvider><Row /></AgentTimelineStateProvider>)
     fireEvent.click(screen.getByRole('button'))
-    view.rerender(<NativeTimelineStateProvider>{null}</NativeTimelineStateProvider>)
-    view.rerender(<NativeTimelineStateProvider><Row /></NativeTimelineStateProvider>)
+    view.rerender(<AgentTimelineStateProvider>{null}</AgentTimelineStateProvider>)
+    view.rerender(<AgentTimelineStateProvider><Row /></AgentTimelineStateProvider>)
     expect(screen.getByRole('button').getAttribute('aria-expanded')).toBe('true')
   })
 })

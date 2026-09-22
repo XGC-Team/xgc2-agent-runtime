@@ -1,4 +1,4 @@
-package nativeagent
+package agentruntime
 
 import (
 	"bufio"
@@ -38,7 +38,7 @@ func (d *claudeDriver) Prompt(ctx context.Context, turn, prompt string) error {
 	if _, bound := localMCP(ctx); bound {
 		// Retain the legacy built-in tool restriction while allowing the native
 		// CLI to ask permission for the separately reviewed MCP tools.
-		return d.promptWithControl(ctx, turn, prompt, NativeOptions{}, true)
+		return d.promptWithControl(ctx, turn, prompt, AgentOptions{}, true)
 	}
 	args, _ := commandArgs("claude")
 	d.mu.Lock()
@@ -162,7 +162,7 @@ func (d *claudeDecoder) consume(m map[string]any) error {
 		}
 		if d.native == "" {
 			d.native = id
-			if err := d.emit(Event{Kind: "session.identity", NativeSessionID: id}); err != nil {
+			if err := d.emit(Event{Kind: "session.identity", AgentSessionID: id}); err != nil {
 				return err
 			}
 		}

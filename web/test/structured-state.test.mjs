@@ -1,16 +1,16 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { applyEvent, emptyStream, NATIVE_SCHEMA } from '../dist/state.js'
-const event = (seq, extra = {}) => ({ schemaVersion: NATIVE_SCHEMA, sessionId: 's_test', provider: 'codex', seq, kind: 'item.snapshot', turnId: 't_test', itemId: 'tool-one', role: 'tool', text: 'output', ...extra })
+import { applyEvent, emptyStream, AGENT_RUNTIME_SCHEMA } from '../dist/state.js'
+const event = (seq, extra = {}) => ({ schemaVersion: AGENT_RUNTIME_SCHEMA, sessionId: 's_test', provider: 'codex', seq, kind: 'item.snapshot', turnId: 't_test', itemId: 'tool-one', role: 'tool', text: 'output', ...extra })
 const empty = () => emptyStream('s_test','codex')
 const command = { type: 'commandExecution', command: 'rg experiment src', cwd: '/reviewed/workspace', exitCode: 2, durationMs: 17, commandActions: [{ type: 'search',command: 'rg experiment src',query: 'experiment',path: 'src' }] }
 test('structured tool metadata, native refs and receipt times survive deltas and final state', () => {
- let state = applyEvent(empty(), event(1,{ sourceMethod: 'item/started',createdAt: '2026-09-06T00:00:00Z',nativeThreadId: 'thread-one',nativeTurnId: 'turn-one',details: command }))
+ let state = applyEvent(empty(), event(1,{ sourceMethod: 'item/started',createdAt: '2026-09-06T00:00:00Z',providerThreadId: 'thread-one',providerTurnId: 'turn-one',details: command }))
  state = applyEvent(state,event(2,{ kind: 'item.delta',text: ' next',sourceMethod: 'item/commandExecution/outputDelta',createdAt: '2026-09-06T00:00:01Z' }))
  assert.deepEqual(state.items[0].details,command)
  assert.equal(state.items[0].sourceMethod,'item/commandExecution/outputDelta')
- assert.equal(state.items[0].nativeThreadId,'thread-one')
- assert.equal(state.items[0].nativeTurnId,'turn-one')
+ assert.equal(state.items[0].providerThreadId,'thread-one')
+ assert.equal(state.items[0].providerTurnId,'turn-one')
  assert.equal(state.items[0].createdAt,'2026-09-06T00:00:00Z')
  assert.equal(state.items[0].updatedAt,'2026-09-06T00:00:01Z')
  assert.equal(state.items[0].text,'output next')
@@ -20,7 +20,7 @@ test('file changes retain structured operation and move destination', () => {
  assert.deepEqual(applyEvent(empty(),event(1,{details})).items[0].details,details)
 })
 test('request method, source item and human question descriptions survive the pending projection', () => {
- const request={id:'q_one',kind:'question',title:'Input',sourceMethod:'item/tool/requestUserInput',nativeThreadId:'thread-one',nativeTurnId:'turn-one',nativeItemId:'tool-one',createdAt:'2026-09-06T00:00:00Z',options:[],questions:[{id:'scope',header:'Debug scope',text:'Which robot?',options:[{id:'one',label:'One robot',kind:'answer',description:'Keep the debug scope narrow'}],multiple:false,freeText:true}]}
+ const request={id:'q_one',kind:'question',title:'Input',sourceMethod:'item/tool/requestUserInput',providerThreadId:'thread-one',providerTurnId:'turn-one',providerItemId:'tool-one',createdAt:'2026-09-06T00:00:00Z',options:[],questions:[{id:'scope',header:'Debug scope',text:'Which robot?',options:[{id:'one',label:'One robot',kind:'answer',description:'Keep the debug scope narrow'}],multiple:false,freeText:true}]}
  const state=applyEvent(empty(),event(1,{kind:'input.request',itemId:'q_one',request}))
  assert.deepEqual(state.pending.q_one,{...request,submitted:false})
 })
@@ -30,8 +30,8 @@ test('unknown detail kinds, role changes, malformed times and oversized structur
  assert.throws(()=>applyEvent(empty(),event(1,{details:{...command,exitCode:1.1}})))
  assert.throws(()=>applyEvent(empty(),event(1,{details:{type:'fileChange',changes:Array(65).fill({path:'x',kind:{type:'add'},diff:''})}})))
  assert.throws(()=>applyEvent(empty(),event(1,{role:'assistant',details:command})))
- const state=applyEvent(empty(),event(1,{details:command,nativeThreadId:'thread-one'}))
- assert.throws(()=>applyEvent(state,event(2,{details:command,nativeThreadId:'thread-other'})))
+ const state=applyEvent(empty(),event(1,{details:command,providerThreadId:'thread-one'}))
+ assert.throws(()=>applyEvent(state,event(2,{details:command,providerThreadId:'thread-other'})))
  assert.throws(()=>applyEvent(state,event(2,{details:{type:'webSearch',query:'changed type'}})))
 })
 test('MCP content is structured and sensitive RPC/config fields cannot be decoded as tool data', () => {

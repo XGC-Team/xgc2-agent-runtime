@@ -1,4 +1,4 @@
-package nativeagent
+package agentruntime
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 
 type queuedCall struct {
 	text    string
-	options NativeOptions
+	options AgentOptions
 }
 type queueDriver struct {
 	conversationDriver
@@ -17,7 +17,7 @@ type queueDriver struct {
 	finish  chan string
 }
 
-func (d *queueDriver) PromptWithOptions(ctx context.Context, turn, prompt string, options NativeOptions) error {
+func (d *queueDriver) PromptWithOptions(ctx context.Context, turn, prompt string, options AgentOptions) error {
 	d.started <- queuedCall{prompt, options}
 	select {
 	case status := <-d.finish:
@@ -129,7 +129,7 @@ func TestQueuedMessagesSurviveRestartWithoutAutomaticReplay(t *testing.T) {
 	}
 	live := restored.sessions[s.ID]
 	live.mu.Lock()
-	e = live.appendLocked(Event{Kind: "item.snapshot", TurnID: got.Items[0].ID, ItemID: "user", Role: "user", Text: got.Items[0].Text, Status: "submitted", Details: promptDetails(NativeOptions{})})
+	e = live.appendLocked(Event{Kind: "item.snapshot", TurnID: got.Items[0].ID, ItemID: "user", Role: "user", Text: got.Items[0].Text, Status: "submitted", Details: promptDetails(AgentOptions{})})
 	live.mu.Unlock()
 	if e != nil {
 		t.Fatal(e)

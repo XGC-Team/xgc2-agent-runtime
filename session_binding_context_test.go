@@ -1,4 +1,4 @@
-package nativeagent
+package agentruntime
 
 import (
 	"context"
@@ -48,7 +48,7 @@ func TestBrokerCarriesEphemeralBindingValuesWithoutRequestLifetimeOrJournal(t *t
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), privateBindingKey{}, "one-use-private-enrollment"))
-	scope := Create{ProfileID: profile.ID, Context: ContextRef{Kind: "experiment", ID: "exp-a"}, Workspace: WorkspaceRef{ID: "workspace", Revision: "v1"}, NativeAccessConfirmed: true}
+	scope := Create{ProfileID: profile.ID, Context: ContextRef{Kind: "experiment", ID: "exp-a"}, Workspace: WorkspaceRef{ID: "workspace", Revision: "v1"}, AgentAccessConfirmed: true}
 	session, err := broker.Create(ctx, "context-test", scope)
 	if err != nil {
 		broker.Close()

@@ -1,4 +1,4 @@
-package nativeagent
+package agentruntime
 
 import (
 	"context"
@@ -51,8 +51,8 @@ func (d *rpcDriver) emit(e Event) {
 		e.TurnID = d.turn
 	}
 	if d.profile.Provider == "codex" {
-		e.NativeThreadID = d.nativeSession
-		e.NativeTurnID = d.nativeTurn
+		e.AgentThreadID = d.nativeSession
+		e.AgentTurnID = d.nativeTurn
 	}
 	d.mu.Unlock()
 	if err := d.sink(e); err != nil {
@@ -98,7 +98,7 @@ func (d *rpcDriver) Open(ctx context.Context, cwd, nativeID string) error {
 	stopOpen := context.AfterFunc(ctx, func() { _ = d.Close() })
 	defer stopOpen()
 	go func() { <-peer.done; _ = c.Wait() }()
-	handshake, cancel := context.WithTimeout(ctx, NativeSettingsTimeout)
+	handshake, cancel := context.WithTimeout(ctx, AgentSettingsTimeout)
 	defer cancel()
 	var result map[string]any
 	if d.profile.Provider == "codex" {
@@ -203,13 +203,13 @@ func (d *rpcDriver) Open(ctx context.Context, cwd, nativeID string) error {
 			return err
 		}
 	}
-	d.emit(Event{Kind: "session.identity", NativeSessionID: nativeID})
+	d.emit(Event{Kind: "session.identity", AgentSessionID: nativeID})
 	return nil
 }
 func (d *rpcDriver) Prompt(ctx context.Context, turn, prompt string) error {
 	return d.PromptWithOptions(ctx, turn, prompt, d.profile.Defaults)
 }
-func (d *rpcDriver) PromptWithOptions(ctx context.Context, turn, prompt string, options NativeOptions) error {
+func (d *rpcDriver) PromptWithOptions(ctx context.Context, turn, prompt string, options AgentOptions) error {
 	if d.profile.Provider == "grok" || d.profile.Provider == "cursor" {
 		d.mu.Lock()
 		changed := acpLaunchPermission(d.profile.Provider, options.Permission) != acpLaunchPermission(d.profile.Provider, d.launchPermission)

@@ -1,13 +1,13 @@
 import { useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { NativeConversation } from '../../src/NativeConversation.js'
+import { AgentConversation } from '../../src/AgentConversation.js'
 import { DecisionCard } from '../../src/DecisionCard.js'
-import { emptyStream, type NativeItem } from '../../src/state.js'
+import { emptyStream, type AgentItem } from '../../src/state.js'
 import type { TimelineItem } from '../../src/upstream/t3/types.js'
-import '../../dist/native-chat.css'
+import '../../dist/agent-chat.css'
 
 const start = Date.now() - 5000
-function message(index: number): NativeItem {
+function message(index: number): AgentItem {
   const turnId = `t_${String(index).padStart(32, '0')}`
   return { key: JSON.stringify([turnId, 'user']), id: 'user', turnId,
     role: index % 2 ? 'assistant' : 'user', text: `Message ${index}: a bounded streaming timeline with variable-height content. ` + 'Measured content. '.repeat(index % 7),
@@ -29,7 +29,7 @@ function Acceptance() {
   return <>
     <button data-fixture-action="append" onClick={() => setItems(current => [...current, { ...message(current.length), createdAt: new Date().toISOString() }])}>Append canonical message</button>
     <div style={{ height: 680, width: 480 }}>
-      <NativeConversation state={state} active draft={draft} onDraftChange={setDraft} onSend={async () => undefined} onAnswer={async () => undefined}
+      <AgentConversation state={state} active draft={draft} onDraftChange={setDraft} onSend={async () => undefined} onAnswer={async () => undefined}
         additionalItems={additionalItems} emptyState={null}
         dock={<div data-fixture-fixed="dock">Queue dock</div>}
         additionalPendingRequests={<div data-fixture-fixed="approval"><DecisionCard identity="pending-domain" title="Pending domain approval" state="pending"
@@ -38,6 +38,6 @@ function Acceptance() {
   </>
 }
 const style = document.createElement('style')
-style.textContent = `body{margin:12px;font-family:Arial,sans-serif} [data-xgc-role="native-agent-conversation"]{height:100%} [data-fixture-domain="remote"]{padding:14px;background:#202024;color:white;border-radius:8px} button{cursor:pointer}`
+style.textContent = `body{margin:12px;font-family:Arial,sans-serif} [data-xgc-role="agent-conversation"]{height:100%} [data-fixture-domain="remote"]{padding:14px;background:#202024;color:white;border-radius:8px} button{cursor:pointer}`
 document.head.appendChild(style)
 createRoot(document.getElementById('root')!).render(<Acceptance />)

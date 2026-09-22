@@ -250,7 +250,7 @@
     ]
   ],
   "adaptations": [
-    "Build scopes all rules to .xgc-native-chat with CSS @scope",
+    "Build scopes all rules to .xgc-agent-chat with CSS @scope",
     "Tailwind theme and property names are namespaced to avoid host token collisions",
     "XGC semantic colors are mapped separately in t3-host-tokens.css"
   ]

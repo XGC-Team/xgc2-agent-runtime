@@ -28,10 +28,10 @@ export function StaleApprovalNotice({ identity, open, createdAt, missing = false
     finally { setBusy(false) }
   }
   return <div role="status" className="my-1 border-l-2 border-warning pl-2 text-xs text-warning"
-    data-xgc-role="native-agent-approval-stale" data-xgc-id={identity} data-xgc-stale="true">
+    data-xgc-role="agent-approval-stale" data-xgc-id={identity} data-xgc-stale="true">
     <span>{locale === 'zh' ? '此授权请求可能已过期' : 'This approval request may have expired'}</span>
     <Button type="button" size="xs" variant="ghost" disabled={busy || !onRefresh}
-      data-xgc-role="native-agent-approval-refresh" data-xgc-id={identity}
+      data-xgc-role="agent-approval-refresh" data-xgc-id={identity}
       onClick={() => void refresh()}>{locale === 'zh' ? '刷新' : 'Refresh'}</Button>
     {error ? <span role="alert">{error}</span> : null}
   </div>

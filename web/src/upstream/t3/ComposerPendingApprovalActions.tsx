@@ -37,7 +37,7 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
         const button = (
           <Button
             key={option.decision}
-            data-xgc-role="native-agent-approval-option"
+            data-xgc-role="agent-approval-option"
             data-xgc-id={`${identity}:${requestId}:${option.decision}`}
             size="sm"
             variant="outline"

@@ -57,18 +57,18 @@
   min-width: 0;
   min-height: 0;
 }
-:scope[data-xgc-role="native-agent-conversation"] { height: 100%; }
+:scope[data-xgc-role="agent-conversation"] { height: 100%; }
 /* @scope contains styles; a stacking context here would trap native menus
    beneath a later sibling conversation. Keep the existing portal layer. */
 /* The operator-selected send treatment only applies when sending is enabled.
    Empty/busy input and the separate interrupt action retain their own states. */
-:scope [data-xgc-role="native-agent-send"]:enabled {
+:scope [data-xgc-role="agent-send"]:enabled {
   background-color: var(--xgc-t3-color-black);
   color: var(--xgc-t3-color-white);
 }
 /* Model, effort and permission stay on one composer row. Menus portal to the
    host, so do not clip overflow on this element. */
-:scope[data-xgc-role="native-composer-controls"] [data-xgc-composer-row] {
+:scope[data-xgc-role="agent-composer-controls"] [data-xgc-composer-row] {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
@@ -77,17 +77,17 @@
   /* Only the row is a size container; native portals remain its siblings. */
   container: xgc-native-composer / inline-size;
 }
-:scope[data-xgc-role="native-composer-controls"] [data-xgc-composer-row] > * {
+:scope[data-xgc-role="agent-composer-controls"] [data-xgc-composer-row] > * {
   min-width: 0;
   flex-shrink: 0;
 }
-:scope[data-xgc-role="native-composer-controls"] [data-xgc-composer-row] > [data-xgc-role="native-composer-model"] {
+:scope[data-xgc-role="agent-composer-controls"] [data-xgc-composer-row] > [data-xgc-role="agent-composer-model"] {
   flex: 1 1 auto;
 }
 /* Keep the real permission state identifiable without truncating its name:
    narrow rows use the existing state icon, full accessible text and menu. */
 @container xgc-native-composer (max-width: 20rem) {
-  :scope [data-xgc-role="native-composer-permission"] [data-xgc-permission-label] {
+  :scope [data-xgc-role="agent-composer-permission"] [data-xgc-permission-label] {
     display: none;
   }
 }

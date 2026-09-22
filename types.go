@@ -1,5 +1,5 @@
-// Package nativeagent is a client of native agents, not a model gateway or agent loop.
-package nativeagent
+// Package agentruntime is a client of native agents, not a model gateway or agent loop.
+package agentruntime
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 	"strings"
 )
 
-const Schema = "xgc.native-agent/v1"
+const Schema = "xgc.agent-runtime/v1"
 const MaxFrame = 4 << 20
 const MaxText = 256 << 10
 
@@ -30,14 +30,14 @@ var digest = regexp.MustCompile(`^[a-f0-9]{64}$`)
 // path, version and digest are resolved by the host. No API accepts credentials,
 // argv, environment, shell commands or arbitrary provider endpoints.
 type Profile struct {
-	ID              string        `json:"id"`
-	Provider        string        `json:"provider"`
-	Executable      string        `json:"executable"`
-	SHA256          string        `json:"sha256"`
-	ReviewedVersion string        `json:"reviewedVersion"`
-	BillingReviewed bool          `json:"billingReviewed"`
-	Disabled        bool          `json:"disabled,omitempty"`
-	Defaults        NativeOptions `json:"defaults,omitempty"`
+	ID              string       `json:"id"`
+	Provider        string       `json:"provider"`
+	Executable      string       `json:"executable"`
+	SHA256          string       `json:"sha256"`
+	ReviewedVersion string       `json:"reviewedVersion"`
+	BillingReviewed bool         `json:"billingReviewed"`
+	Disabled        bool         `json:"disabled,omitempty"`
+	Defaults        AgentOptions `json:"defaults,omitempty"`
 }
 type Config struct {
 	SchemaVersion string    `json:"schemaVersion"`
@@ -133,7 +133,7 @@ func checkExecutable(p Profile) error {
 // Native login files remain owned/read by the CLI. In particular, the Go
 // service's API keys, tokens, endpoint overrides and service credentials are
 // never inherited. This does not inspect or certify the CLI's own billing config.
-func NativeEnvironment(source []string) []string {
+func AgentEnvironment(source []string) []string {
 	allowed := map[string]bool{"PATH": true, "HOME": true, "USER": true, "LOGNAME": true, "SHELL": true, "LANG": true, "LC_ALL": true, "TMPDIR": true, "SYSTEMROOT": true, "WINDIR": true, "USERPROFILE": true, "LOCALAPPDATA": true, "APPDATA": true}
 	result := []string{}
 	for _, v := range source {
@@ -160,18 +160,18 @@ type Question struct {
 	Header   string   `json:"header,omitempty"`
 }
 type Request struct {
-	ID             string          `json:"id"`
-	Kind           string          `json:"kind"`
-	Title          string          `json:"title"`
-	Text           string          `json:"text,omitempty"`
-	Options        []Option        `json:"options"`
-	Questions      []Question      `json:"questions"`
-	SourceMethod   string          `json:"sourceMethod,omitempty"`
-	NativeThreadID string          `json:"nativeThreadId,omitempty"`
-	NativeTurnID   string          `json:"nativeTurnId,omitempty"`
-	NativeItemID   string          `json:"nativeItemId,omitempty"`
-	CreatedAt      string          `json:"createdAt,omitempty"`
-	Details        *RequestDetails `json:"details,omitempty"`
+	ID            string          `json:"id"`
+	Kind          string          `json:"kind"`
+	Title         string          `json:"title"`
+	Text          string          `json:"text,omitempty"`
+	Options       []Option        `json:"options"`
+	Questions     []Question      `json:"questions"`
+	SourceMethod  string          `json:"sourceMethod,omitempty"`
+	AgentThreadID string          `json:"providerThreadId,omitempty"`
+	AgentTurnID   string          `json:"providerTurnId,omitempty"`
+	AgentItemID   string          `json:"providerItemId,omitempty"`
+	CreatedAt     string          `json:"createdAt,omitempty"`
+	Details       *RequestDetails `json:"details,omitempty"`
 }
 type RequestDetails struct {
 	ToolName  string          `json:"toolName,omitempty"`
@@ -245,28 +245,28 @@ func (r Request) ValidateAnswer(a Answer) error {
 // Event is a presentation record, never a product judgement or trusted model receipt.
 // Native method names identify origin; credentials and unfiltered RPC frames are not stored.
 type Event struct {
-	Queue           *PromptQueue     `json:"queue,omitempty"`
-	SchemaVersion   string           `json:"schemaVersion"`
-	SessionID       string           `json:"sessionId"`
-	Seq             uint64           `json:"seq"`
-	Provider        string           `json:"provider"`
-	TurnID          string           `json:"turnId,omitempty"`
-	ItemID          string           `json:"itemId,omitempty"`
-	Kind            string           `json:"kind"`
-	Role            string           `json:"role,omitempty"`
-	Text            string           `json:"text,omitempty"`
-	Title           string           `json:"title,omitempty"`
-	Status          string           `json:"status,omitempty"`
-	SourceMethod    string           `json:"sourceMethod,omitempty"`
-	NativeSessionID string           `json:"nativeSessionId,omitempty"`
-	Request         *Request         `json:"request,omitempty"`
-	CreatedAt       string           `json:"createdAt,omitempty"`
-	NativeThreadID  string           `json:"nativeThreadId,omitempty"`
-	NativeTurnID    string           `json:"nativeTurnId,omitempty"`
-	Details         map[string]any   `json:"details,omitempty"`
-	RuntimeID       string           `json:"runtimeId,omitempty"`
-	Metadata        *SessionMetadata `json:"metadata,omitempty"`
-	Decision        *DecisionReceipt `json:"decision,omitempty"`
+	Queue          *PromptQueue     `json:"queue,omitempty"`
+	SchemaVersion  string           `json:"schemaVersion"`
+	SessionID      string           `json:"sessionId"`
+	Seq            uint64           `json:"seq"`
+	Provider       string           `json:"provider"`
+	TurnID         string           `json:"turnId,omitempty"`
+	ItemID         string           `json:"itemId,omitempty"`
+	Kind           string           `json:"kind"`
+	Role           string           `json:"role,omitempty"`
+	Text           string           `json:"text,omitempty"`
+	Title          string           `json:"title,omitempty"`
+	Status         string           `json:"status,omitempty"`
+	SourceMethod   string           `json:"sourceMethod,omitempty"`
+	AgentSessionID string           `json:"providerSessionId,omitempty"`
+	Request        *Request         `json:"request,omitempty"`
+	CreatedAt      string           `json:"createdAt,omitempty"`
+	AgentThreadID  string           `json:"providerThreadId,omitempty"`
+	AgentTurnID    string           `json:"providerTurnId,omitempty"`
+	Details        map[string]any   `json:"details,omitempty"`
+	RuntimeID      string           `json:"runtimeId,omitempty"`
+	Metadata       *SessionMetadata `json:"metadata,omitempty"`
+	Decision       *DecisionReceipt `json:"decision,omitempty"`
 }
 
 // ContextRef identifies the product-owned resource; the broker never interprets it.
@@ -282,34 +282,34 @@ type WorkspaceRef struct {
 	Revision string `json:"revision"`
 }
 type Create struct {
-	ProfileID             string        `json:"profileId"`
-	Context               ContextRef    `json:"context"`
-	Workspace             WorkspaceRef  `json:"workspace"`
-	NativeAccessConfirmed bool          `json:"nativeAccessConfirmed"`
-	Options               NativeOptions `json:"options,omitempty"`
+	ProfileID            string       `json:"profileId"`
+	Context              ContextRef   `json:"context"`
+	Workspace            WorkspaceRef `json:"workspace"`
+	AgentAccessConfirmed bool         `json:"accessConfirmed"`
+	Options              AgentOptions `json:"options,omitempty"`
 }
 
 func (c Create) Validate() error {
-	if !safeID.MatchString(c.ProfileID) || !safeID.MatchString(c.Context.Kind) || !safeID.MatchString(c.Context.ID) || !safeID.MatchString(c.Workspace.ID) || c.Workspace.Revision == "" || len(c.Workspace.Revision) > 256 || strings.ContainsAny(c.Workspace.Revision, "\x00\r\n") || !c.NativeAccessConfirmed {
+	if !safeID.MatchString(c.ProfileID) || !safeID.MatchString(c.Context.Kind) || !safeID.MatchString(c.Context.ID) || !safeID.MatchString(c.Workspace.ID) || c.Workspace.Revision == "" || len(c.Workspace.Revision) > 256 || strings.ContainsAny(c.Workspace.Revision, "\x00\r\n") || !c.AgentAccessConfirmed {
 		return errors.New("a profile, typed context, reviewed workspace revision and native-access consent are required")
 	}
 	return nil
 }
 
 type Session struct {
-	SchemaVersion    string        `json:"schemaVersion"`
-	ID               string        `json:"id"`
-	Scope            Create        `json:"scope"`
-	Provider         string        `json:"provider"`
-	State            string        `json:"state"`
-	NativeSessionID  string        `json:"nativeSessionId,omitempty"`
-	CreatedAt        string        `json:"createdAt"`
-	LastSeq          uint64        `json:"lastSeq"`
-	Options          NativeOptions `json:"options,omitempty"`
-	Title            string        `json:"title"`
-	Archived         bool          `json:"archived"`
-	MetadataRevision uint64        `json:"metadataRevision"`
-	RuntimeID        string        `json:"runtimeId,omitempty"`
+	SchemaVersion    string       `json:"schemaVersion"`
+	ID               string       `json:"id"`
+	Scope            Create       `json:"scope"`
+	Provider         string       `json:"provider"`
+	State            string       `json:"state"`
+	AgentSessionID   string       `json:"providerSessionId,omitempty"`
+	CreatedAt        string       `json:"createdAt"`
+	LastSeq          uint64       `json:"lastSeq"`
+	Options          AgentOptions `json:"options,omitempty"`
+	Title            string       `json:"title"`
+	Archived         bool         `json:"archived"`
+	MetadataRevision uint64       `json:"metadataRevision"`
+	RuntimeID        string       `json:"runtimeId,omitempty"`
 	// No cwd or secrets in API read models.
 }
 type Sink func(Event) error

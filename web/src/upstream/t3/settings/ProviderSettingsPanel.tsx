@@ -5,16 +5,16 @@
 import type { ReactNode } from 'react';
 import { cn } from '../utils.js';
 import { providerIcons, providerLabels } from '../ProviderModelPicker.js';
-import type { NativeProviderConfiguration } from '../../../providerSettings.js';
+import type { AgentProviderConfiguration } from '../../../providerSettings.js';
 export function ProviderSettingsPanel({ providers, selectedId, onSelect, children, locale = 'en' }: {
-  locale?: 'en' | 'zh'; providers: readonly NativeProviderConfiguration[]; selectedId: string; onSelect: (id: string) => void; children: ReactNode;
+  locale?: 'en' | 'zh'; providers: readonly AgentProviderConfiguration[]; selectedId: string; onSelect: (id: string) => void; children: ReactNode;
 }) {
   // 去卡片化：列表-编辑两栏靠留白与发丝线分区，不再套边框底卡（编辑排版纪律）
   return <div className="lg:grid lg:grid-cols-[13.5rem_minmax(0,1fr)] lg:gap-0">
-    <div className="mb-3 lg:mb-0" role="navigation" aria-label={locale === 'zh' ? '原生工作者' : 'Native providers'}>
+    <div className="mb-3 lg:mb-0" role="navigation" aria-label={locale === 'zh' ? '供应者' : 'Providers'}>
       {providers.map(provider => { const Icon = providerIcons[provider.provider]; const selected = selectedId === provider.id; return <button key={provider.id} type="button"
         onClick={() => onSelect(provider.id)} aria-pressed={selected}
-        data-xgc-role="native-provider-select" data-xgc-id={provider.id}
+        data-xgc-role="agent-provider-select" data-xgc-id={provider.id}
         className={cn('flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors duration-150', selected ? 'bg-muted/45' : 'hover:bg-muted/25')}>
         <Icon className={cn('size-4 shrink-0', selected ? 'text-foreground' : 'text-muted-foreground')} aria-hidden="true" />
         <span className="min-w-0 flex-1">

@@ -133,7 +133,7 @@ describe('migrated T3 conversation host boundary', () => {
     const input = props({ model: { sessionKey: 'dock', approvals: [], userInputs: [] } });
     render(<T3Conversation {...input} model={{ ...input.model, items: [], isRunning: false }}
       dock={<div data-testid="conversation-dock">pad</div>} onSend={vi.fn()} onInterrupt={vi.fn()} />);
-    const conversation = document.querySelector('[data-xgc-role="native-agent-conversation"]');
+    const conversation = document.querySelector('[data-xgc-role="agent-conversation"]');
     const dock = screen.getByTestId('conversation-dock');
     const composer = screen.getByRole('textbox');
     expect(conversation?.contains(dock)).toBe(true);

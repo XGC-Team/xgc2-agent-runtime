@@ -1,4 +1,4 @@
-package nativeagent
+package agentruntime
 
 import (
 	"bufio"
@@ -121,7 +121,7 @@ func inspectClaude(ctx context.Context, p Profile, result *ProviderSetting) {
 	result.Detail = "Model capabilities use the fixed T3 Code Claude catalog, filtered by installed CLI version. Native CLI flags carry selections; no model fallback is configured."
 	result.Defaults = mergeOptions(result.Defaults, p.Defaults)
 }
-func claudeOptionArgs(options NativeOptions) ([]string, error) {
+func claudeOptionArgs(options AgentOptions) ([]string, error) {
 	args := []string{"--print", "--verbose", "--output-format", "stream-json", "--include-partial-messages", "--input-format", "stream-json", "--permission-prompt-tool", "stdio"}
 	if options.Model != "" {
 		args = append(args, "--model="+options.Model)
@@ -200,7 +200,7 @@ func (c *claudeControl) request(frame map[string]any) {
 			response["subtype"] = "error"
 			response["error"] = "Unsupported native control request"
 		} else {
-			request := Request{Kind: "permission", Title: text(body, "title"), Text: text(body, "description"), Options: []Option{{ID: "allow", Label: "Allow this operation", Kind: "allow_once"}, {ID: "deny", Label: "Decline", Kind: "reject_once"}}, Questions: []Question{}, SourceMethod: "claude:can_use_tool", NativeThreadID: native, NativeItemID: text(body, "tool_use_id")}
+			request := Request{Kind: "permission", Title: text(body, "title"), Text: text(body, "description"), Options: []Option{{ID: "allow", Label: "Allow this operation", Kind: "allow_once"}, {ID: "deny", Label: "Decline", Kind: "reject_once"}}, Questions: []Question{}, SourceMethod: "claude:can_use_tool", AgentThreadID: native, AgentItemID: text(body, "tool_use_id")}
 			if request.Title == "" {
 				request.Title = text(body, "tool_name")
 			}
@@ -250,14 +250,14 @@ func (c *claudeControl) request(frame map[string]any) {
 		}
 	}()
 }
-func (d *claudeDriver) PromptWithOptions(ctx context.Context, turn, prompt string, options NativeOptions) error {
-	if options == (NativeOptions{}) {
+func (d *claudeDriver) PromptWithOptions(ctx context.Context, turn, prompt string, options AgentOptions) error {
+	if options == (AgentOptions{}) {
 		return d.Prompt(ctx, turn, prompt)
 	}
 	return d.promptWithControl(ctx, turn, prompt, options, false)
 }
 
-func (d *claudeDriver) promptWithControl(ctx context.Context, turn, prompt string, options NativeOptions, restrictedTools bool) error {
+func (d *claudeDriver) promptWithControl(ctx context.Context, turn, prompt string, options AgentOptions, restrictedTools bool) error {
 	args, err := claudeOptionArgs(options)
 	if err != nil {
 		return err

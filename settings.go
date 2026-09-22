@@ -1,4 +1,4 @@
-package nativeagent
+package agentruntime
 
 import (
 	"context"
@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-const NativeSettingsTimeout = 60 * time.Second
+const AgentSettingsTimeout = 60 * time.Second
 
 type NamedValue struct {
 	ID    string `json:"id"`
@@ -38,28 +38,28 @@ type LoginStatus struct {
 	Detail string `json:"detail"`
 }
 type ProviderSetting struct {
-	ID          string        `json:"id"`
-	Provider    string        `json:"provider"`
-	Enabled     bool          `json:"enabled"`
-	BinaryPath  string        `json:"binaryPath"`
-	Available   bool          `json:"available"`
-	Version     string        `json:"version"`
-	Login       LoginStatus   `json:"login"`
-	Detail      string        `json:"detail"`
-	Defaults    NativeOptions `json:"defaults"`
-	Models      []Model       `json:"models"`
-	Permissions []Permission  `json:"permissions"`
+	ID          string       `json:"id"`
+	Provider    string       `json:"provider"`
+	Enabled     bool         `json:"enabled"`
+	BinaryPath  string       `json:"binaryPath"`
+	Available   bool         `json:"available"`
+	Version     string       `json:"version"`
+	Login       LoginStatus  `json:"login"`
+	Detail      string       `json:"detail"`
+	Defaults    AgentOptions `json:"defaults"`
+	Models      []Model      `json:"models"`
+	Permissions []Permission `json:"permissions"`
 }
 type Settings struct {
 	Revision  string            `json:"revision"`
 	Providers []ProviderSetting `json:"providers"`
 }
 type ProviderUpdate struct {
-	ID         string        `json:"id"`
-	Provider   string        `json:"provider"`
-	Enabled    bool          `json:"enabled"`
-	BinaryPath string        `json:"binaryPath,omitempty"`
-	Defaults   NativeOptions `json:"defaults"`
+	ID         string       `json:"id"`
+	Provider   string       `json:"provider"`
+	Enabled    bool         `json:"enabled"`
+	BinaryPath string       `json:"binaryPath,omitempty"`
+	Defaults   AgentOptions `json:"defaults"`
 }
 type SettingsUpdate struct {
 	Revision string         `json:"revision"`
@@ -98,7 +98,15 @@ func DefaultSettingsPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(root, "xgc", "native-agents.json"), nil
+	dir := filepath.Join(root, "xgc")
+	path := filepath.Join(dir, "agent-runtime.json")
+	previous := filepath.Join(dir, "native-agents.json")
+	if _, err = os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		if _, err = os.Stat(previous); err == nil {
+			_ = os.Rename(previous, path)
+		}
+	}
+	return path, nil
 }
 func lookupProvider(provider, command string) (string, error) {
 	if command != "" {
@@ -231,7 +239,7 @@ func resolveProfile(input ProviderUpdate) (Profile, error) {
 	}
 	path, err := lookupProvider(input.Provider, command)
 	if err != nil {
-		if p.Disabled && input.Defaults == (NativeOptions{}) {
+		if p.Disabled && input.Defaults == (AgentOptions{}) {
 			return p, nil
 		}
 		return p, errors.New("native executable not found")
@@ -264,7 +272,7 @@ func resolveProfile(input ProviderUpdate) (Profile, error) {
 	return p, nil
 }
 func (b *Broker) RefreshSettings(ctx context.Context, id string) (Settings, error) {
-	ctx, cancel := context.WithTimeout(ctx, NativeSettingsTimeout)
+	ctx, cancel := context.WithTimeout(ctx, AgentSettingsTimeout)
 	defer cancel()
 	current, err := b.Settings()
 	if err != nil {
@@ -296,7 +304,7 @@ func (b *Broker) RefreshSettings(ctx context.Context, id string) (Settings, erro
 	return b.Settings()
 }
 func (b *Broker) UpdateSettings(ctx context.Context, input SettingsUpdate) (Settings, error) {
-	ctx, cancel := context.WithTimeout(ctx, NativeSettingsTimeout)
+	ctx, cancel := context.WithTimeout(ctx, AgentSettingsTimeout)
 	defer cancel()
 	s := b.settings
 	if s == nil {
@@ -442,7 +450,7 @@ func (b *Broker) UpdateSettings(ctx context.Context, input SettingsUpdate) (Sett
 	}
 	return b.Settings()
 }
-func validateOptions(o NativeOptions, p ProviderSetting) error {
+func validateOptions(o AgentOptions, p ProviderSetting) error {
 	if o.Model == "" && o.Effort != "" {
 		return errors.New("select a native model before its reasoning effort")
 	}
@@ -479,7 +487,7 @@ func validateOptions(o NativeOptions, p ProviderSetting) error {
 	return nil
 }
 func (b *Broker) warmSelection(ctx context.Context, p Profile) {
-	ctx, cancel := context.WithTimeout(ctx, NativeSettingsTimeout)
+	ctx, cancel := context.WithTimeout(ctx, AgentSettingsTimeout)
 	defer cancel()
 	if b.settings == nil || p.Executable == "" {
 		return
@@ -496,10 +504,10 @@ func (b *Broker) warmSelection(ctx context.Context, p Profile) {
 	s.inventory[p.Executable+":"+p.SHA256] = inventory
 	s.mu.Unlock()
 }
-func (b *Broker) selection(profile Profile, override NativeOptions) (NativeOptions, error) {
+func (b *Broker) selection(profile Profile, override AgentOptions) (AgentOptions, error) {
 	selected := mergeOptions(profile.Defaults, override)
 	if b.settings == nil {
-		if selected == (NativeOptions{}) {
+		if selected == (AgentOptions{}) {
 			return selected, nil
 		}
 		return selected, errors.New("native selections require configured provider capabilities")
@@ -508,7 +516,7 @@ func (b *Broker) selection(profile Profile, override NativeOptions) (NativeOptio
 	inventory, ok := b.settings.inventory[profile.Executable+":"+profile.SHA256]
 	b.settings.mu.Unlock()
 	if !ok {
-		if selected == (NativeOptions{}) {
+		if selected == (AgentOptions{}) {
 			return selected, nil
 		}
 		return selected, errors.New("refresh native provider capabilities before selecting model or permissions")
@@ -535,7 +543,7 @@ func cliOutput(ctx context.Context, p Profile, args ...string) ([]byte, error) {
 		args = append([]string{"--no-auto-update"}, args...)
 	}
 	cmd := exec.CommandContext(ctx, p.Executable, args...)
-	cmd.Env = NativeEnvironment(os.Environ())
+	cmd.Env = AgentEnvironment(os.Environ())
 	isolateProcess(cmd)
 	cmd.WaitDelay = 2 * time.Second
 	cmd.Cancel = func() error { return terminateProcess(cmd, true) }
@@ -559,7 +567,7 @@ func (b *limitedOutput) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 func inspectProvider(ctx context.Context, p Profile) ProviderSetting {
-	ctx, cancel := context.WithTimeout(ctx, NativeSettingsTimeout)
+	ctx, cancel := context.WithTimeout(ctx, AgentSettingsTimeout)
 	defer cancel()
 	result := emptySetting(p)
 	if p.Executable == "" {
@@ -671,7 +679,7 @@ func inspectCodex(ctx context.Context, p Profile, result *ProviderSetting) {
 	// are used; credentials, endpoints and arbitrary config never enter API/journal.
 	if config, e := peer.Call(ctx, "config/read", map[string]any{"includeLayers": false}); e == nil {
 		native := obj(config["config"])
-		candidate := NativeOptions{Model: text(native, "model"), Effort: text(native, "model_reasoning_effort")}
+		candidate := AgentOptions{Model: text(native, "model"), Effort: text(native, "model_reasoning_effort")}
 		if validateOptions(candidate, *result) == nil {
 			result.Defaults = mergeOptions(candidate, p.Defaults)
 		}

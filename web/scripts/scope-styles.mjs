@@ -1,8 +1,8 @@
 import { readFile, writeFile, unlink } from 'node:fs/promises'
 import postcss from 'postcss'
 
-const input = new URL('../dist/native-chat.unscoped.css', import.meta.url)
-const output = new URL('../dist/native-chat.css', import.meta.url)
+const input = new URL('../dist/agent-chat.unscoped.css', import.meta.url)
+const output = new URL('../dist/agent-chat.css', import.meta.url)
 const root = postcss.parse(await readFile(input, 'utf8'))
 const renamed = new Map()
 root.walkAtRules('layer', (layer) => {
@@ -41,7 +41,7 @@ root.walkDecls((declaration) => {
 root.walkRules((rule) => {
   rule.selector = rule.selector.replace(/(^|,\s*)(:root|:host|html|body)(?=\s|,|$)/g, '$1:scope')
 })
-const scope = postcss.atRule({ name: 'scope', params: '(.xgc-native-chat)' })
+const scope = postcss.atRule({ name: 'scope', params: '(.xgc-agent-chat)' })
 scope.append(root.nodes)
 scope.append(postcss.parse(await readFile(new URL('../src/t3-host-tokens.css', import.meta.url), 'utf8')).nodes)
 const result = postcss.root()

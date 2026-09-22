@@ -97,12 +97,12 @@ function ProviderSettingsSelect({
         onChange(nextProviderConfigWithFieldValue(value, field, next === fallback ? "" : next));
       }}
     >
-      <SelectTrigger id={inputId} data-xgc-role="native-provider-field-input" data-xgc-id={inputId} size={size} className={className} aria-label={field.label}>
+      <SelectTrigger id={inputId} data-xgc-role="agent-provider-field-input" data-xgc-id={inputId} size={size} className={className} aria-label={field.label}>
         <SelectValue>{label}</SelectValue>
       </SelectTrigger>
       <SelectPopup align="start" alignItemWithTrigger={false}>
         {options.map((option) => (
-          <SelectItem key={option.value} value={option.value} data-xgc-role="native-provider-field-option" data-xgc-id={`${inputId}:${option.value || "default"}`}>
+          <SelectItem key={option.value} value={option.value} data-xgc-role="agent-provider-field-option" data-xgc-id={`${inputId}:${option.value || "default"}`}>
             {option.label}
           </SelectItem>
         ))}
@@ -155,7 +155,7 @@ function ProviderSettingsFieldRow({
           onCheckedChange={(checked) =>
             onChange(nextProviderConfigWithFieldValue(value, field, Boolean(checked)))
           }
-          aria-label={field.label} data-xgc-role="native-provider-field-input" data-xgc-id={inputId}
+          aria-label={field.label} data-xgc-role="agent-provider-field-input" data-xgc-id={inputId}
           aria-describedby={descriptionId}
         />
       ) : field.control === "select" ? (
@@ -169,7 +169,7 @@ function ProviderSettingsFieldRow({
         />
       ) : field.control === "textarea" ? (
         <Textarea
-          id={inputId} data-xgc-role="native-provider-field-input" data-xgc-id={inputId}
+          id={inputId} data-xgc-role="agent-provider-field-input" data-xgc-id={inputId}
           aria-describedby={descriptionId}
           className="w-full"
           value={readProviderConfigString(value, field.key)}
@@ -181,7 +181,7 @@ function ProviderSettingsFieldRow({
         />
       ) : (
         <Input
-          id={inputId} data-xgc-role="native-provider-field-input" data-xgc-id={inputId}
+          id={inputId} data-xgc-role="agent-provider-field-input" data-xgc-id={inputId}
           aria-describedby={descriptionId}
           size="sm"
           className="h-7 w-full leading-7 text-[13px] sm:h-7 sm:leading-7 sm:text-[13px]"
@@ -197,7 +197,7 @@ function ProviderSettingsFieldRow({
     return (
       <SettingsRow
         title={
-          field.control === "switch" ? field.label : <label htmlFor={inputId} data-xgc-role="native-provider-field-label" data-xgc-id={inputId}>{field.label}</label>
+          field.control === "switch" ? field.label : <label htmlFor={inputId} data-xgc-role="agent-provider-field-label" data-xgc-id={inputId}>{field.label}</label>
         }
         description={
           field.description ? <span id={descriptionId}>{field.description}</span> : undefined
@@ -220,7 +220,7 @@ function ProviderSettingsFieldRow({
             onCheckedChange={(checked) =>
               onChange(nextProviderConfigWithFieldValue(value, field, Boolean(checked)))
             }
-            aria-label={field.label} data-xgc-role="native-provider-field-input" data-xgc-id={inputId}
+            aria-label={field.label} data-xgc-role="agent-provider-field-input" data-xgc-id={inputId}
           />
         </div>
       </FieldFrame>
@@ -230,7 +230,7 @@ function ProviderSettingsFieldRow({
   if (field.control === "select") {
     return (
       <FieldFrame variant={variant}>
-        <label htmlFor={inputId} data-xgc-role="native-provider-field-label" data-xgc-id={inputId} className={cn(variant === "card" && "block")}>
+        <label htmlFor={inputId} data-xgc-role="agent-provider-field-label" data-xgc-id={inputId} className={cn(variant === "card" && "block")}>
           {label}
           <ProviderSettingsSelect
             field={field}
@@ -249,10 +249,10 @@ function ProviderSettingsFieldRow({
   if (field.control === "textarea") {
     return (
       <FieldFrame variant={variant}>
-        <label htmlFor={inputId} data-xgc-role="native-provider-field-label" data-xgc-id={inputId} className={cn(variant === "card" && "block")}>
+        <label htmlFor={inputId} data-xgc-role="agent-provider-field-label" data-xgc-id={inputId} className={cn(variant === "card" && "block")}>
           {label}
           <Textarea
-            id={inputId} data-xgc-role="native-provider-field-input" data-xgc-id={inputId}
+            id={inputId} data-xgc-role="agent-provider-field-input" data-xgc-id={inputId}
             className={cn(variant === "card" && "mt-1.5")}
             value={readProviderConfigString(value, field.key)}
             onChange={(event) =>
@@ -270,11 +270,11 @@ function ProviderSettingsFieldRow({
   const type = field.control === "password" ? "password" : undefined;
   return (
     <FieldFrame variant={variant}>
-      <label htmlFor={inputId} data-xgc-role="native-provider-field-label" data-xgc-id={inputId} className={cn(variant === "card" && "block")}>
+      <label htmlFor={inputId} data-xgc-role="agent-provider-field-label" data-xgc-id={inputId} className={cn(variant === "card" && "block")}>
         {label}
         {variant === "card" ? (
           <DraftInput
-            id={inputId} data-xgc-role="native-provider-field-input" data-xgc-id={inputId}
+            id={inputId} data-xgc-role="agent-provider-field-input" data-xgc-id={inputId}
             size="sm"
             className="mt-1.5"
             type={type}
@@ -286,7 +286,7 @@ function ProviderSettingsFieldRow({
           />
         ) : (
           <Input
-            id={inputId} data-xgc-role="native-provider-field-input" data-xgc-id={inputId}
+            id={inputId} data-xgc-role="agent-provider-field-input" data-xgc-id={inputId}
             className="bg-background"
             type={type}
             autoComplete={field.control === "password" ? "off" : undefined}

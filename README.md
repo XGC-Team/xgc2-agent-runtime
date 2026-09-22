@@ -6,7 +6,7 @@ Context and workspace values are identifiers. They do not carry filesystem paths
 
 The Go module is `github.com/XGC-Team/xgc2-agent-runtime`. The TypeScript package
 [`web`](web/package.json), `@xgc2/agent-runtime`, owns the matching state/reducer,
-HTTP client, React stream hook and `NativeConversation` presenter. A product renders these shared facts.
+HTTP client, React stream hook and `AgentConversation` presenter. A product renders these shared facts.
 The presenter uses a pinned T3 Code chat slice.
 Its source, license, theme contract and capability boundaries are documented in
 [`web/UPSTREAM.md`](web/UPSTREAM.md).
@@ -27,11 +27,11 @@ broker, err := nativeagent.NewBroker(privateJournalRoot, profiles, prepare, nil)
 // Optional shared local provider settings (one file for every local product).
 err = nativeagent.ConfigureBroker(broker, nativeagent.BrokerOptions{SettingsFile: reviewedProfilePath})
 // Handle err. Omit ConfigureBroker for legacy immutable profiles.
-err = nativeagent.RegisterRoutes(mux, broker, "/api/native-agents")
+err = nativeagent.RegisterRoutes(mux, broker, "/api/agent-runtime")
 ```
 
 `Create` has `ProfileID`, `Context ContextRef{Kind, ID}`,
-`Workspace WorkspaceRef{ID, Revision}`, and `NativeAccessConfirmed`.
+`Workspace WorkspaceRef{ID, Revision}`, and `AgentAccessConfirmed`.
 Context and workspace are comparable value references; they never contain
 private paths. The product's `Prepare` callback verifies resource ownership,
 reviewed workspace revision and fresh/resume policy. `Factory` is injectable
@@ -44,15 +44,15 @@ enter this package. Idempotency is scoped to context kind and
 ID; a repeated key with changed workspace/profile/consent is a conflict.
 
 ```ts
-import { createNativeAgentClient } from '@xgc2/agent-runtime/client'
-import { NativeConversation, useNativeStream } from '@xgc2/agent-runtime/react'
+import { createAgentClient } from '@xgc2/agent-runtime/client'
+import { AgentConversation, useAgentStream } from '@xgc2/agent-runtime/react'
 import '@xgc2/agent-runtime/styles.css'
 
-const client = createNativeAgentClient({ basePath: '/api/native-agents' })
+const client = createAgentClient({ basePath: '/api/agent-runtime' })
 // Inside a product component:
-const { state, connection, error } = useNativeStream(session, reload, client)
+const { state, connection, error } = useAgentStream(session, reload, client)
 // Render shared native facts and forward only explicit operator decisions:
-<NativeConversation state={state} locale="en"
+<AgentConversation state={state} locale="en"
   onSend={(text) => sendWithProductIdempotency(session.id, text)}
   onInterrupt={() => client.cancelNativeTurn(session.id)}
   onAnswer={(requestId, answer) => client.answerNativeRequest(session.id, requestId, answer)} />
@@ -62,12 +62,12 @@ The client exposes provider settings/refresh and profiles/sessions/create/prompt
 Inject `fetch` for product transport tests. Both HTTP and SSE accept only a
 same-origin absolute API root. The HTTP server independently enforces loopback
 peer, loopback Host, same-origin browser requests and the custom mutation
-header `X-XGC-Native-Client: 1`. A product-controlled proxy on the same machine may forward the original matching
+header `X-XGC-Agent-Client: 1`. A product-controlled proxy on the same machine may forward the original matching
 Host/Origin and mutation header over a real loopback connection, after checking
 its own resource/session authority. Forwarded headers never establish trust;
 remote authenticated ingress is not provided.
 
-The single protocol schema is `xgc.native-agent/v1`. Deltas append, snapshots
+The single protocol schema is `xgc.agent-runtime/v1`. Deltas append, snapshots
 replace, patches preserve text, and item identity includes its turn. Submitted
 answers remain pending until a native resolution event. Transport reconnect
 replays by cursor and never resubmits a prompt. EOF does not imply success.
@@ -80,7 +80,7 @@ events. It does not inspect vendor authentication or transcript files.
 
 ## Shared provider settings and current-turn options
 
-`DefaultSettingsPath()` resolves the shared local `xgc/native-agents.json` under
+`DefaultSettingsPath()` resolves the shared local `xgc/agent-runtime.json` under
 `os.UserConfigDir()`. A missing file is allowed. `ConfigureBroker` initially
 lists the five native clients disabled; installing a CLI never enables it.
 Settings contain enabled state, a reviewed binary path and default model,
@@ -107,10 +107,10 @@ behavior. Native defaults are used only when actually reported; no higher
 model, reasoning level or permission fallback is invented.
 
 Prompt receipts with selections use the typed details contract
-`{type:"userMessage",nativeOptions:{model?,effort?,permission?}}` on the submitted
+`{type:"userMessage",providerOptions:{model?,effort?,permission?}}` on the submitted
 `user` snapshot. The same option values restore the durable idempotency check.
 The Web decoder normalizes only the previously persisted, untagged
-`{nativeOptions:{...}}` shape on that exact receipt; other unknown detail types,
+`{providerOptions:{...}}` shape on that exact receipt; other unknown detail types,
 roles or fields remain errors. Existing journals are replayed without rewriting
 or resubmitting their prompts. The shared sanitized nine-event replay fixture
 tests the Go receipt and Web decoder together; native/tool details and prompt
@@ -182,6 +182,6 @@ remaining queue. Host restart retains pending input but requires explicit resume
 A durably submitted user item is never replayed as another turn after a crash.
 
 Queueing is separate from provider steering and from answering native approval
-or question requests. Hosts opt into `NativeConversation.queueEnabled` and use
-`NativePromptQueue` for presentation callbacks. Ordinary direct prompt clients
+or question requests. Hosts opt into `AgentConversation.queueEnabled` and use
+`AgentPromptQueue` for presentation callbacks. Ordinary direct prompt clients
 retain their existing ready-only contract.

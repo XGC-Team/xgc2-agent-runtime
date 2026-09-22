@@ -1,4 +1,4 @@
-package nativeagent
+package agentruntime
 
 import (
 	"context"
@@ -26,13 +26,13 @@ func settingsBroker(t *testing.T, path string) *Broker {
 	}
 	return b
 }
-func settingsFixtureUpdate(t *testing.T, revision string, defaults NativeOptions) SettingsUpdate {
+func settingsFixtureUpdate(t *testing.T, revision string, defaults AgentOptions) SettingsUpdate {
 	t.Helper()
 	p := testProfile(t, "codex")
 	return SettingsUpdate{Revision: revision, Provider: ProviderUpdate{ID: "codex", Provider: "codex", Enabled: true, BinaryPath: p.Executable, Defaults: defaults}}
 }
 func TestSettingsDiscoveryCASAndCrossBrokerVisibility(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "native-agents.json")
+	path := filepath.Join(t.TempDir(), "agent-runtime.json")
 	a, b := settingsBroker(t, path), settingsBroker(t, path)
 	initial, err := a.Settings()
 	if err != nil || len(initial.Providers) != 5 {
@@ -43,7 +43,7 @@ func TestSettingsDiscoveryCASAndCrossBrokerVisibility(t *testing.T) {
 			t.Fatalf("discovery asserted unprobed state: %+v", p)
 		}
 	}
-	defaults := NativeOptions{Model: "fixture-luna", Effort: "low", Permission: "approval-required"}
+	defaults := AgentOptions{Model: "fixture-luna", Effort: "low", Permission: "approval-required"}
 	saved, err := a.UpdateSettings(context.Background(), settingsFixtureUpdate(t, initial.Revision, defaults))
 	if err != nil {
 		t.Fatal(err)
@@ -81,7 +81,7 @@ func TestSettingsDiscoveryCASAndCrossBrokerVisibility(t *testing.T) {
 	}
 }
 func TestSettingsConcurrentIndependentBrokersOnlyOneCASWinner(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "native-agents.json")
+	path := filepath.Join(t.TempDir(), "agent-runtime.json")
 	a, b := settingsBroker(t, path), settingsBroker(t, path)
 	initial, _ := a.Settings()
 	start := make(chan struct{})
@@ -92,7 +92,7 @@ func TestSettingsConcurrentIndependentBrokersOnlyOneCASWinner(t *testing.T) {
 		go func(broker *Broker) {
 			defer wg.Done()
 			<-start
-			_, err := broker.UpdateSettings(context.Background(), settingsFixtureUpdate(t, initial.Revision, NativeOptions{}))
+			_, err := broker.UpdateSettings(context.Background(), settingsFixtureUpdate(t, initial.Revision, AgentOptions{}))
 			results <- err
 		}(broker)
 	}
@@ -114,10 +114,10 @@ func TestSettingsConcurrentIndependentBrokersOnlyOneCASWinner(t *testing.T) {
 	}
 }
 func TestNativeSelectionsCrossBrokerSnapshotAndIdempotency(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "native-agents.json")
+	path := filepath.Join(t.TempDir(), "agent-runtime.json")
 	settingsOwner, consumer := settingsBroker(t, path), settingsBroker(t, path)
 	initial, _ := settingsOwner.Settings()
-	defaults := NativeOptions{Model: "fixture-native", Effort: "medium", Permission: "approval-required"}
+	defaults := AgentOptions{Model: "fixture-native", Effort: "medium", Permission: "approval-required"}
 	saved, err := settingsOwner.UpdateSettings(context.Background(), settingsFixtureUpdate(t, initial.Revision, defaults))
 	if err != nil {
 		t.Fatal(err)
@@ -127,7 +127,7 @@ func TestNativeSelectionsCrossBrokerSnapshotAndIdempotency(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitState(t, consumer, s.ID, "ready")
-	changed := NativeOptions{Model: "fixture-luna", Effort: "low", Permission: "full-access"}
+	changed := AgentOptions{Model: "fixture-luna", Effort: "low", Permission: "full-access"}
 	if _, err = settingsOwner.UpdateSettings(context.Background(), settingsFixtureUpdate(t, saved.Revision, changed)); err != nil {
 		t.Fatal(err)
 	}
@@ -136,12 +136,12 @@ func TestNativeSelectionsCrossBrokerSnapshotAndIdempotency(t *testing.T) {
 	if existing.Options != defaults {
 		t.Fatalf("session changed: %+v", existing.Options)
 	}
-	selected := NativeOptions{Model: "fixture-luna", Effort: "low", Permission: "approval-required"}
+	selected := AgentOptions{Model: "fixture-luna", Effort: "low", Permission: "approval-required"}
 	turn, err := consumer.PromptWithOptions(s.ID, "options-turn", "require-options", selected)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = consumer.PromptWithOptions(s.ID, "options-turn", "require-options", NativeOptions{Model: "fixture-native", Effort: "medium"}); !errors.Is(err, ErrConflict) {
+	if _, err = consumer.PromptWithOptions(s.ID, "options-turn", "require-options", AgentOptions{Model: "fixture-native", Effort: "medium"}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("options changed replay must conflict: %v", err)
 	}
 	replay, err := consumer.PromptWithOptions(s.ID, "options-turn", "require-options", selected)
@@ -203,24 +203,24 @@ func TestNativeSelectionsCrossBrokerSnapshotAndIdempotency(t *testing.T) {
 	}
 }
 func TestUnsupportedProviderOptionsAndSettingsSecurity(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "native-agents.json")
+	path := filepath.Join(t.TempDir(), "agent-runtime.json")
 	b := settingsBroker(t, path)
 	initial, _ := b.Settings()
-	update := settingsFixtureUpdate(t, initial.Revision, NativeOptions{Model: "invented"})
+	update := settingsFixtureUpdate(t, initial.Revision, AgentOptions{Model: "invented"})
 	if _, err := b.UpdateSettings(context.Background(), update); err == nil {
 		t.Fatal("unadvertised model accepted")
 	}
 	update.Provider.Provider = "cursor"
-	update.Provider.Defaults = NativeOptions{Permission: "full-access"}
+	update.Provider.Defaults = AgentOptions{Permission: "full-access"}
 	if _, err := b.UpdateSettings(context.Background(), update); err == nil {
 		t.Fatal("Codex permissions leaked into ACP")
 	}
 	mux := http.NewServeMux()
-	if err := RegisterRoutes(mux, b, "/api/native-agents"); err != nil {
+	if err := RegisterRoutes(mux, b, "/api/agent-runtime"); err != nil {
 		t.Fatal(err)
 	}
 	for _, body := range []string{`{"revision":"x","provider":{"id":"codex","provider":"codex","enabled":true,"defaults":{},"token":"bad"}}`, `{"id":"codex","args":["secret"]}`} {
-		path := "/api/native-agents/settings"
+		path := "/api/agent-runtime/settings"
 		if strings.Contains(body, "args") {
 			path += "/refresh"
 		}
@@ -237,10 +237,10 @@ func TestUnsupportedProviderOptionsAndSettingsSecurity(t *testing.T) {
 }
 
 func TestRestartKeepsPrivateProfileSnapshotAndReplaySkipsDiscovery(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "native-agents.json")
+	path := filepath.Join(t.TempDir(), "agent-runtime.json")
 	b := settingsBroker(t, path)
 	initial, _ := b.Settings()
-	defaults := NativeOptions{Model: "fixture-native", Effort: "medium", Permission: "approval-required"}
+	defaults := AgentOptions{Model: "fixture-native", Effort: "medium", Permission: "approval-required"}
 	saved, err := b.UpdateSettings(context.Background(), settingsFixtureUpdate(t, initial.Revision, defaults))
 	if err != nil {
 		t.Fatal(err)
@@ -250,7 +250,7 @@ func TestRestartKeepsPrivateProfileSnapshotAndReplaySkipsDiscovery(t *testing.T)
 		t.Fatal(err)
 	}
 	waitState(t, b, s.ID, "ready")
-	selected := NativeOptions{Permission: "full-access"}
+	selected := AgentOptions{Permission: "full-access"}
 	retained := mergeOptions(defaults, selected)
 	turn, err := b.PromptWithOptions(s.ID, "replay-without-probe", "fixture", selected)
 	if err != nil {
@@ -275,7 +275,7 @@ func TestRestartKeepsPrivateProfileSnapshotAndReplaySkipsDiscovery(t *testing.T)
 	if count != 0 {
 		t.Fatal("invalid or idempotent request launched metadata inspection")
 	}
-	changed := NativeOptions{Model: "fixture-luna", Effort: "low", Permission: "full-access"}
+	changed := AgentOptions{Model: "fixture-luna", Effort: "low", Permission: "full-access"}
 	if _, err = b.UpdateSettings(context.Background(), settingsFixtureUpdate(t, saved.Revision, changed)); err != nil {
 		t.Fatal(err)
 	}

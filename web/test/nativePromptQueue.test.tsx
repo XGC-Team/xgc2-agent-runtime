@@ -1,11 +1,11 @@
 import {cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react'
 import {afterEach,describe,expect,it,vi} from 'vitest'
-import {NativePromptQueue} from '../src/NativePromptQueue.js'
+import {AgentPromptQueue} from '../src/AgentPromptQueue.js'
 afterEach(cleanup)
 describe('queued messages',()=>{
  it('edits only after save and exposes removal and accessible reordering',async()=>{
   const edit=vi.fn(async()=>undefined),remove=vi.fn(async()=>undefined),reorder=vi.fn(async()=>undefined)
-  render(<NativePromptQueue items={[{id:'a',text:'first'},{id:'b',text:'second'}]} paused onEdit={edit} onRemove={remove} onReorder={reorder} onPause={async()=>undefined} onRetry={async()=>undefined}/>)
+  render(<AgentPromptQueue items={[{id:'a',text:'first'},{id:'b',text:'second'}]} paused onEdit={edit} onRemove={remove} onReorder={reorder} onPause={async()=>undefined} onRetry={async()=>undefined}/>)
   fireEvent.click(screen.getAllByRole('button',{name:'Edit message'})[0]!)
   fireEvent.change(screen.getByRole('textbox',{name:'Edit queued message'}),{target:{value:'edited'}})
   expect(edit).not.toHaveBeenCalled()

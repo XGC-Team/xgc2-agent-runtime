@@ -1,4 +1,4 @@
-package nativeagent
+package agentruntime
 
 import (
 	"context"
@@ -34,7 +34,7 @@ func TestCustomRouteBaseRetainsOriginAndMutationGuards(t *testing.T) {
 		want                 int
 	}{
 		{"GET", "/api/ground-station/native-agents/providers", "", 200},
-		{"GET", "/api/v1/native-agents/providers", "", 404},
+		{"GET", "/api/v1/agent-runtime/providers", "", 404},
 		{"POST", "/api/ground-station/native-agents/sessions", "", 403},
 		{"POST", "/api/ground-station/native-agents/sessions", "X-Research-Native-Client", 403},
 		{"POST", "/api/ground-station/native-agents/sessions", ClientHeader, 415},

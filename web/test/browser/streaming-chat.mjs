@@ -18,9 +18,9 @@ page.on('pageerror', error => errors.push(String(error)))
 const metrics = { inputRows: 240 }
 try {
   await page.goto(`http://127.0.0.1:${address.port}/test/browser/streaming-chat.html`)
-  await page.locator('[data-xgc-role="native-agent-item"]').first().waitFor()
+  await page.locator('[data-xgc-role="agent-item"]').first().waitFor()
   await page.evaluate(() => {
-    let node = document.querySelector('[data-xgc-role="native-agent-item"]')?.parentElement
+    let node = document.querySelector('[data-xgc-role="agent-item"]')?.parentElement
     while (node && !/auto|scroll/.test(getComputedStyle(node).overflowY)) node = node.parentElement
     if (!node) throw new Error('LegendList did not create a scrollport')
     node.dataset.fixtureScrollport = 'true'
@@ -30,10 +30,10 @@ try {
     const node = document.querySelector(selector)
     return node && node.scrollHeight - node.scrollTop - node.clientHeight < 5
   }, scrollport)
-  metrics.initialMountedRows = await page.locator('[data-xgc-role="native-agent-item"]').count()
+  metrics.initialMountedRows = await page.locator('[data-xgc-role="agent-item"]').count()
   assert(metrics.initialMountedRows < 100, `Not virtualized: ${metrics.initialMountedRows} mounted rows`)
   await page.locator('[data-fixture-live="true"]').waitFor({ state: 'attached' })
-  const fixedRects = () => page.evaluate(() => ['[data-fixture-fixed="approval"]', '[data-fixture-fixed="dock"]', '[data-xgc-role="native-agent-composer"]']
+  const fixedRects = () => page.evaluate(() => ['[data-fixture-fixed="approval"]', '[data-fixture-fixed="dock"]', '[data-xgc-role="agent-composer"]']
     .map(selector => { const rect = document.querySelector(selector).getBoundingClientRect(); return { top: rect.top, height: rect.height } }))
   const beforeFixed = await fixedRects()
   await page.locator('[data-fixture-action="append"]').click()
@@ -69,7 +69,7 @@ try {
       node.scrollTop = (node.scrollHeight - node.clientHeight) * ((i % 40) / 40)
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
       durations.push((performance.now() - started) / 2)
-      maxMountedRows = Math.max(maxMountedRows, document.querySelectorAll('[data-xgc-role="native-agent-item"]').length)
+      maxMountedRows = Math.max(maxMountedRows, document.querySelectorAll('[data-xgc-role="agent-item"]').length)
     }
     return { durations, maxMountedRows }
   })

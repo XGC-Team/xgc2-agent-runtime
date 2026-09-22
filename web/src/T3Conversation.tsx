@@ -6,7 +6,7 @@ import { ComposerPrimaryActions } from './upstream/t3/ComposerPrimaryActions.js'
 import { ComposerPromptEditor } from './upstream/t3/ComposerPromptEditor.js';
 import { DecisionCard } from './DecisionCard.js';
 import { StaleApprovalNotice } from './StaleApprovalNotice.js';
-import type { NativeTimelineState } from './timelineState.js';
+import type { AgentTimelineState } from './timelineState.js';
 import { ComposerPendingApprovalActions } from './upstream/t3/ComposerPendingApprovalActions.js';
 import { ComposerPendingUserInputPanel } from './upstream/t3/ComposerPendingUserInputPanel.js';
 import { MessagesTimeline } from './upstream/t3/MessagesTimeline.js';
@@ -45,8 +45,8 @@ export interface T3ConversationProps extends T3PendingRequestsProps {
   draft?: string;
   onDraftChange?: (draft: string) => void;
   clearDraftOnSend?: boolean;
-  timelineState?: NativeTimelineState;
-  onTimelineStateChange?: (state: NativeTimelineState) => void;
+  timelineState?: AgentTimelineState;
+  onTimelineStateChange?: (state: AgentTimelineState) => void;
   onSend: (text: string) => Promise<unknown>;
   onInterrupt: () => Promise<unknown>;
 }
@@ -97,7 +97,7 @@ function UserInputCard({ request, active, disabled, onUserInput, onCancelRequest
     />
     {progress.activeQuestion?.allowCustomAnswer !== false ? <ComposerBanner.Body>
       {progress.activeQuestion?.isSecret ? <input type="password" autoComplete="off" disabled={locked} aria-label="Your answer"
-        data-xgc-role="native-agent-secret-answer" data-xgc-id={`${identity}:${request.requestId}:${progress.activeQuestion.id}`}
+        data-xgc-role="agent-secret-answer" data-xgc-id={`${identity}:${request.requestId}:${progress.activeQuestion.id}`}
         className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm text-foreground"
         value={progress.customAnswer} onChange={event => { const id = progress.activeQuestion?.id; if (id) setAnswers(current => ({ ...current, [id]: setPendingUserInputCustomAnswer(current[id], event.target.value) })); }}
       /> : <ComposerPromptEditor identityId={`${request.requestId}:${progress.activeQuestion?.id ?? "answer"}`} value={progress.customAnswer} disabled={locked} placeholder="Your answer"
@@ -105,11 +105,11 @@ function UserInputCard({ request, active, disabled, onUserInput, onCancelRequest
       />}
     </ComposerBanner.Body> : null}
     <ComposerBanner.Row><ComposerBanner.Actions>
-      <Button size="sm" variant="ghost" disabled={locked} data-xgc-role="native-agent-request-cancel" data-xgc-id={`${identity}:${request.requestId}`} onClick={() => void submit(true)}>Cancel request</Button>
-      {questionIndex > 0 ? <Button size="sm" variant="outline" className="rounded-full" disabled={locked} data-xgc-role="native-agent-question-previous" data-xgc-id={`${identity}:${request.requestId}`} onClick={() => setQuestionIndex(value => value - 1)}>Previous</Button> : null}
+      <Button size="sm" variant="ghost" disabled={locked} data-xgc-role="agent-request-cancel" data-xgc-id={`${identity}:${request.requestId}`} onClick={() => void submit(true)}>Cancel request</Button>
+      {questionIndex > 0 ? <Button size="sm" variant="outline" className="rounded-full" disabled={locked} data-xgc-role="agent-question-previous" data-xgc-id={`${identity}:${request.requestId}`} onClick={() => setQuestionIndex(value => value - 1)}>Previous</Button> : null}
       <Button type="button" size="sm" className="rounded-full bg-message-action text-message-action-foreground hover:bg-message-action-hover px-4"
         disabled={locked || (progress.isLastQuestion ? !progress.isComplete : !progress.canAdvance)}
-        data-xgc-role="native-agent-question-submit" data-xgc-id={`${identity}:${request.requestId}`}
+        data-xgc-role="agent-question-submit" data-xgc-id={`${identity}:${request.requestId}`}
         onClick={() => { if (progress.isLastQuestion) void submit(); else advance(); }}
       >{progress.isLastQuestion ? 'Submit answer' : 'Next question'}</Button>
     </ComposerBanner.Actions></ComposerBanner.Row>
@@ -142,12 +142,12 @@ function PendingRequestsContent({ model, active, disabled = false, locale = 'en'
         status={awaitingProvider ? locale === 'zh' ? '回复已提交' : 'Response submitted' : busy.has(approval.requestId) ? locale === 'zh' ? '提交回复中' : 'Submitting response' : undefined}
         actions={<>
           <ComposerPendingApprovalActions requestId={approval.requestId} options={approval.options} isResponding={locked} onRespondToApproval={respond} />
-          <Button size="sm" variant="ghost" disabled={locked} data-xgc-role="native-agent-request-cancel" data-xgc-id={`${model.sessionKey}:${approval.requestId}`} onClick={() => void respond(approval.requestId)}>{locale === 'zh' ? '取消' : 'Cancel request'}</Button>
+          <Button size="sm" variant="ghost" disabled={locked} data-xgc-role="agent-request-cancel" data-xgc-id={`${model.sessionKey}:${approval.requestId}`} onClick={() => void respond(approval.requestId)}>{locale === 'zh' ? '取消' : 'Cancel request'}</Button>
         </>}
         detailsLabel={locale === 'zh' ? '详情与授权选项' : 'Details and approval options'}
         details={<>
         <pre className="xgc-decision-card-review" role="group" aria-label={approval.title || 'Approval request'}
-          data-xgc-role="native-agent-approval-review" data-xgc-id={`${model.sessionKey}:${approval.requestId}`}
+          data-xgc-role="agent-approval-review" data-xgc-id={`${model.sessionKey}:${approval.requestId}`}
           data-approval-detail={approval.truncated ? 'partial' : 'complete'} tabIndex={0}>{approval.detail || approval.title || 'Approval request'}</pre>
           {!locked ? renderApprovalControls?.(approval.requestId) : null}
         </>}>
@@ -164,7 +164,7 @@ function PendingRequestsContent({ model, active, disabled = false, locale = 'en'
 /** Same upstream request surface in conversation and global pending-request entry. */
 export function T3PendingRequests(props: T3PendingRequestsProps) {
   const [portal, setPortal] = useState<HTMLDivElement | null>(null);
-  return <div className="xgc-native-chat" ref={setPortal} data-xgc-role="native-agent-pending-requests" data-xgc-id={props.model.sessionKey}>
+  return <div className="xgc-agent-chat" ref={setPortal} data-xgc-role="agent-pending-requests" data-xgc-id={props.model.sessionKey}>
     <T3IdentityScope value={props.model.sessionKey}><T3PortalContainer value={portal}><TooltipProvider><PendingRequestsContent key={props.model.sessionKey} {...props} /></TooltipProvider></T3PortalContainer></T3IdentityScope>
   </div>;
 }
@@ -203,7 +203,7 @@ function ConversationContent({ model, queueEnabled = false, active, disabled = f
     <div className="min-h-0 flex-1"><MessagesTimeline items={model.items} active={active} emptyState={emptyState}
       timelineState={timelineState} onTimelineStateChange={onTimelineStateChange} /></div>
     {model.approvals.length || model.userInputs.length || additionalPendingRequests ? <div className="min-h-0 max-h-[45%] shrink overflow-y-auto px-3 pb-2 sm:px-5"
-      data-xgc-role="native-agent-request-queue" data-xgc-id={model.sessionKey}>
+      data-xgc-role="agent-request-queue" data-xgc-id={model.sessionKey}>
       <PendingRequestsContent model={model} active={active} disabled={disabled} {...callbacks} />
       {additionalPendingRequests}
     </div> : null}
@@ -213,7 +213,7 @@ function ConversationContent({ model, queueEnabled = false, active, disabled = f
       <ErrorBanner error={externalError || error} />
       <ComposerSurface.Shell><ComposerSurface.Host><ComposerSurface.Main>
         <form onSubmit={event => { event.preventDefault(); void send(); }} data-chat-composer-surface="true"
-          data-xgc-role="native-agent-composer" data-xgc-id={model.sessionKey}
+          data-xgc-role="agent-composer" data-xgc-id={model.sessionKey}
           className="rounded-[20px] transition-[background-color] duration-200">
           {composerEnabled ? <div data-chat-composer-body="true" className="relative px-3 pt-3.5 sm:px-4 sm:pt-4">
             <ComposerPromptEditor value={prompt} onChange={setPrompt} disabled={locked} placeholder="Ask anything..."
@@ -230,7 +230,7 @@ function ConversationContent({ model, queueEnabled = false, active, disabled = f
 
 export function T3Conversation(props: T3ConversationProps) {
   const [portal, setPortal] = useState<HTMLDivElement | null>(null);
-  return <div className="xgc-native-chat relative min-h-0" data-xgc-role="native-agent-conversation" data-xgc-id={props.model.sessionKey}>
+  return <div className="xgc-agent-chat relative min-h-0" data-xgc-role="agent-conversation" data-xgc-id={props.model.sessionKey}>
     <T3IdentityScope value={props.model.sessionKey}><T3PortalContainer value={portal}><TooltipProvider><ConversationContent key={props.model.sessionKey} {...props} /></TooltipProvider></T3PortalContainer></T3IdentityScope>
     <div ref={setPortal} className="pointer-events-none absolute inset-0 z-[130] overflow-visible [&>*]:pointer-events-auto" />
   </div>;

@@ -182,13 +182,13 @@ function ComposerPromptEditorInner(props: ComposerPromptEditorProps) {
   }, [props.onChange]);
   return (
     <div className="relative [font-family:var(--font-composer,var(--font-sans))] [font-size:var(--font-size-prompt,0.875rem)] [@media(max-width:39.999rem)_and_(pointer:coarse)]:[font-size:max(var(--font-size-prompt,1rem),16px)]"
-      data-xgc-role="native-agent-composer-input" data-xgc-id={`${identity}:${props.identityId ?? "composer"}`}>
+      data-xgc-role="agent-composer-input" data-xgc-id={`${identity}:${props.identityId ?? "composer"}`}>
       <PlainTextPlugin
         contentEditable={<ContentEditable
           ref={props.editorRef}
           className={cn("block max-h-50 min-h-17.5 w-full overflow-y-auto whitespace-pre-wrap wrap-break-word bg-transparent leading-relaxed text-foreground focus:outline-none", props.className)}
           data-testid="composer-editor"
-          data-xgc-role="native-agent-composer-input-editor" data-xgc-id={`${identity}:${props.identityId ?? "composer"}`}
+          data-xgc-role="agent-composer-input-editor" data-xgc-id={`${identity}:${props.identityId ?? "composer"}`}
           aria-label="Message the agent"
           aria-placeholder={props.placeholder}
           placeholder={<span />}

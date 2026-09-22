@@ -1,4 +1,4 @@
-package nativeagent
+package agentruntime
 
 import (
 	"context"
@@ -30,7 +30,7 @@ func TestClaudeFixedCatalogVersionAndNativeEffortMapping(t *testing.T) {
 			}
 		}
 	}
-	args, err := claudeOptionArgs(NativeOptions{Model: "claude-opus-4-7", Effort: "xhigh", Permission: "auto-accept-edits"})
+	args, err := claudeOptionArgs(AgentOptions{Model: "claude-opus-4-7", Effort: "xhigh", Permission: "auto-accept-edits"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestClaudeRealSubprocessControlChannelAllowAndDeny(t *testing.T) {
 			asked := false
 			driver, err := NewDriver(testProfile(t, "claude"), func(e Event) error { events = append(events, e); return nil }, func(ctx context.Context, r Request) (Answer, error) {
 				asked = true
-				if r.Kind != "permission" || r.NativeItemID != "tool-1" || r.Details.Command != "fixture-only" {
+				if r.Kind != "permission" || r.AgentItemID != "tool-1" || r.Details.Command != "fixture-only" {
 					t.Errorf("lost native request: %+v", r)
 				}
 				return Answer{OptionID: decision}, nil
@@ -60,7 +60,7 @@ func TestClaudeRealSubprocessControlChannelAllowAndDeny(t *testing.T) {
 			if err = driver.Open(ctx, t.TempDir(), ""); err != nil {
 				t.Fatal(err)
 			}
-			err = driver.(optionDriver).PromptWithOptions(ctx, "turn", "fixture", NativeOptions{Model: "claude-sonnet-5", Effort: "high", Permission: "auto-accept-edits"})
+			err = driver.(optionDriver).PromptWithOptions(ctx, "turn", "fixture", AgentOptions{Model: "claude-sonnet-5", Effort: "high", Permission: "auto-accept-edits"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -89,13 +89,13 @@ func TestACPAdvertisedModelsEffortsAndModesRemainExact(t *testing.T) {
 	}
 	setting := emptySetting(Profile{ID: "cursor", Provider: "cursor", Disabled: true})
 	parseACPInventory(&setting, setup)
-	if len(setting.Models) != 1 || len(setting.Models[0].Efforts) != 2 || setting.Defaults != (NativeOptions{Model: "native/model", Effort: "balanced", Permission: "ask-native"}) {
+	if len(setting.Models) != 1 || len(setting.Models[0].Efforts) != 2 || setting.Defaults != (AgentOptions{Model: "native/model", Effort: "balanced", Permission: "ask-native"}) {
 		t.Fatalf("native descriptors flattened: %+v", setting)
 	}
-	if validateOptions(NativeOptions{Model: "native/model", Effort: "deep", Permission: "ask-native"}, setting) != nil {
+	if validateOptions(AgentOptions{Model: "native/model", Effort: "deep", Permission: "ask-native"}, setting) != nil {
 		t.Fatal("real native options rejected")
 	}
-	if validateOptions(NativeOptions{Model: "native/model", Effort: "xhigh"}, setting) == nil || validateOptions(NativeOptions{Permission: "full-access"}, setting) == nil {
+	if validateOptions(AgentOptions{Model: "native/model", Effort: "xhigh"}, setting) == nil || validateOptions(AgentOptions{Permission: "full-access"}, setting) == nil {
 		t.Fatal("Codex choices leaked into ACP")
 	}
 }
@@ -149,7 +149,7 @@ func TestOpenCodeConfigOnlyModesAndRealVariantSubset(t *testing.T) {
 	}
 	row := emptySetting(Profile{Provider: "opencode"})
 	parseACPInventory(&row, setup)
-	if len(row.Permissions) != 2 || row.Defaults != (NativeOptions{Model: "vendor/model", Effort: "high", Permission: "plan"}) {
+	if len(row.Permissions) != 2 || row.Defaults != (AgentOptions{Model: "vendor/model", Effort: "high", Permission: "plan"}) {
 		t.Fatalf("config-only capability lost: %+v", row)
 	}
 	variants := openCodeVariants("vendor/model\n{\"variants\":{\"high\":{\"headers\":\"private\"},\"low\":{}},\"options\":{\"apiKey\":\"never-return\"}}\nvendor/plain\n{\"variants\":{}}\n")
@@ -166,7 +166,7 @@ func TestClaudeQuestionControlPreservesNativeQuestionKeysAndAnswers(t *testing.T
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	control := &claudeControl{ctx: ctx, input: writer, native: "native-thread", pending: map[string]context.CancelFunc{}, ask: func(_ context.Context, r Request) (Answer, error) {
-		if r.Kind != "question" || r.NativeThreadID != "native-thread" || len(r.Questions) != 1 || r.Questions[0].ID != "Which checks?" || !r.Questions[0].Multiple || r.Questions[0].Options[0].Description != "First check" {
+		if r.Kind != "question" || r.AgentThreadID != "native-thread" || len(r.Questions) != 1 || r.Questions[0].ID != "Which checks?" || !r.Questions[0].Multiple || r.Questions[0].Options[0].Description != "First check" {
 			t.Errorf("native question flattened: %+v", r)
 		}
 		return Answer{Answers: map[string][]string{"Which checks?": {"A", "B"}}}, nil

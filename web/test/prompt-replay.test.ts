@@ -1,28 +1,28 @@
 // @vitest-environment node
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { applyEvent, decodeEvent, emptyStream, type NativeEvent } from '../src/state.js'
-import { nativeConversationModel } from '../src/nativePresentation.js'
+import { applyEvent, decodeEvent, emptyStream, type AgentEvent } from '../src/state.js'
+import { nativeConversationModel } from '../src/agentPresentation.js'
 
 // The real nine-event failure, with message bodies, identities and times replaced.
 // Go tests consume these same bytes and assert the producer's typed receipt.
-const fixture = JSON.parse(readFileSync(new URL('../../testdata/prompt-options-replay.json', import.meta.url), 'utf8')) as NativeEvent[]
+const fixture = JSON.parse(readFileSync(new URL('../../testdata/prompt-options-replay.json', import.meta.url), 'utf8')) as AgentEvent[]
 const receipt = fixture[2]!
-const nativeOptions = { model: 'gpt-5.3-codex-spark', effort: 'high' }
+const providerOptions = { model: 'gpt-5.3-codex-spark', effort: 'high' }
 const empty = () => emptyStream('s_prompt_replay', 'codex')
 const beforeReceipt = () => fixture.slice(0, 2).reduce(applyEvent, empty())
-const typedReceipt = (extra: Record<string, unknown> = {}) => ({ ...receipt, details: { type: 'userMessage', nativeOptions }, ...extra })
+const typedReceipt = (extra: Record<string, unknown> = {}) => ({ ...receipt, details: { type: 'userMessage', providerOptions }, ...extra })
 
 describe('persisted native prompt options replay', () => {
   it('retains permission across partial selections and resets effort on model changes', () => {
-    let state = applyEvent(beforeReceipt(), typedReceipt({ details: { type: 'userMessage', nativeOptions: { ...nativeOptions, permission: 'full-access' } } }))
-    state = applyEvent(state, { ...typedReceipt(), seq: 4, turnId: 't_next', details: { type: 'userMessage', nativeOptions: { model: 'another-model' } } })
+    let state = applyEvent(beforeReceipt(), typedReceipt({ details: { type: 'userMessage', providerOptions: { ...providerOptions, permission: 'full-access' } } }))
+    state = applyEvent(state, { ...typedReceipt(), seq: 4, turnId: 't_next', details: { type: 'userMessage', providerOptions: { model: 'another-model' } } })
     expect(state.options).toEqual({ model: 'another-model', permission: 'full-access' })
   })
   it('replays the existing nine events through the incremental reply and authoritative completion', () => {
     let state = beforeReceipt()
     state = applyEvent(state, receipt)
-    expect(state.items[0]).toMatchObject({ role: 'user', text: 'Fixture prompt', status: 'submitted', details: { type: 'userMessage', nativeOptions } })
+    expect(state.items[0]).toMatchObject({ role: 'user', text: 'Fixture prompt', status: 'submitted', details: { type: 'userMessage', providerOptions } })
     for (const event of fixture.slice(3, 6)) state = applyEvent(state, event)
     expect(state.cursor).toBe(6)
     expect(nativeConversationModel(state).items).toMatchObject([
@@ -45,14 +45,14 @@ describe('persisted native prompt options replay', () => {
     expect(typed).toEqual(legacy)
     expect(applyEvent(legacy, typedReceipt())).toBe(legacy)
     expect(applyEvent(typed, receipt)).toBe(typed)
-    const selected = { ...nativeOptions, permission: 'approval-required' }
-    expect(decodeEvent(typedReceipt({ details: { type: 'userMessage', nativeOptions: selected } }), 's_prompt_replay', 'codex').details)
-      .toEqual({ type: 'userMessage', nativeOptions: selected })
+    const selected = { ...providerOptions, permission: 'approval-required' }
+    expect(decodeEvent(typedReceipt({ details: { type: 'userMessage', providerOptions: selected } }), 's_prompt_replay', 'codex').details)
+      .toEqual({ type: 'userMessage', providerOptions: selected })
   })
 
   it('detects changed selections on a repeated event sequence', () => {
     const state = applyEvent(beforeReceipt(), receipt)
-    expect(() => applyEvent(state, typedReceipt({ details: { type: 'userMessage', nativeOptions: { ...nativeOptions, effort: 'low' } } })))
+    expect(() => applyEvent(state, typedReceipt({ details: { type: 'userMessage', providerOptions: { ...providerOptions, effort: 'low' } } })))
       .toThrow('同一事件序号出现不同内容')
   })
 
@@ -63,16 +63,16 @@ describe('persisted native prompt options replay', () => {
   })
 
   it.each([
-    { name: 'unknown type', details: { type: 'futureType', nativeOptions } },
+    { name: 'unknown type', details: { type: 'futureType', providerOptions } },
     { name: 'private reasoning', details: { type: 'reasoning', content: 'unlisted' } },
-    { name: 'legacy extra fields', details: { nativeOptions, extra: true } },
-    { name: 'typed extra fields', details: { type: 'userMessage', nativeOptions, extra: true } },
-    { name: 'typed truncation', details: { type: 'userMessage', nativeOptions, truncated: true } },
+    { name: 'legacy extra fields', details: { providerOptions, extra: true } },
+    { name: 'typed extra fields', details: { type: 'userMessage', providerOptions, extra: true } },
+    { name: 'typed truncation', details: { type: 'userMessage', providerOptions, truncated: true } },
     { name: 'missing options', details: { type: 'userMessage' } },
-    { name: 'empty options', details: { nativeOptions: {} } },
-    { name: 'unknown option', details: { nativeOptions: { ...nativeOptions, env: 'unlisted' } } },
-    { name: 'malformed option', details: { nativeOptions: { model: 7 } } },
-    { name: 'oversized option', details: { nativeOptions: { model: 'm'.repeat(257) } } },
+    { name: 'empty options', details: { providerOptions: {} } },
+    { name: 'unknown option', details: { providerOptions: { ...providerOptions, env: 'unlisted' } } },
+    { name: 'malformed option', details: { providerOptions: { model: 7 } } },
+    { name: 'oversized option', details: { providerOptions: { model: 'm'.repeat(257) } } },
   ])('rejects $name rather than swallowing unknown details', ({ details }) => {
     expect(() => applyEvent(beforeReceipt(), { ...receipt, details })).toThrow()
   })

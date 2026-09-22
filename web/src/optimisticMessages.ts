@@ -1,8 +1,8 @@
-import type { NativeItem } from './state.js'
+import type { AgentItem } from './state.js'
 import type { TimelineMessage } from './upstream/t3/types.js'
 
 /** A projection of the host's existing outbox/queue, not another message journal. */
-export type NativeOptimisticMessage = {
+export type AgentOptimisticMessage = {
   id: string
   sessionId?: string
   turnId?: string
@@ -15,8 +15,8 @@ export type NativeOptimisticMessage = {
 /** Identity, never text equality, reconciles the pending row with the broker receipt. */
 export function optimisticTimelineItems(
   sessionId: string,
-  canonical: readonly NativeItem[],
-  outgoing: readonly NativeOptimisticMessage[],
+  canonical: readonly AgentItem[],
+  outgoing: readonly AgentOptimisticMessage[],
   locale: 'en' | 'zh',
   retry?: (id: string) => Promise<unknown>,
 ): TimelineMessage[] {

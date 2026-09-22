@@ -1,16 +1,16 @@
 [
   {
-    "schemaVersion": "xgc.native-agent/v1",
+    "schemaVersion": "xgc.agent-runtime/v1",
     "sessionId": "s_prompt_replay",
     "seq": 1,
     "provider": "codex",
     "kind": "session.identity",
-    "nativeSessionId": "thread-fixture",
+    "providerSessionId": "thread-fixture",
     "createdAt": "2026-09-06T00:00:01Z",
-    "nativeThreadId": "thread-fixture"
+    "providerThreadId": "thread-fixture"
   },
   {
-    "schemaVersion": "xgc.native-agent/v1",
+    "schemaVersion": "xgc.agent-runtime/v1",
     "sessionId": "s_prompt_replay",
     "seq": 2,
     "provider": "codex",
@@ -19,7 +19,7 @@
     "createdAt": "2026-09-06T00:00:02Z"
   },
   {
-    "schemaVersion": "xgc.native-agent/v1",
+    "schemaVersion": "xgc.agent-runtime/v1",
     "sessionId": "s_prompt_replay",
     "seq": 3,
     "provider": "codex",
@@ -31,14 +31,14 @@
     "status": "submitted",
     "createdAt": "2026-09-06T00:00:03Z",
     "details": {
-      "nativeOptions": {
+      "providerOptions": {
         "effort": "high",
         "model": "gpt-5.3-codex-spark"
       }
     }
   },
   {
-    "schemaVersion": "xgc.native-agent/v1",
+    "schemaVersion": "xgc.agent-runtime/v1",
     "sessionId": "s_prompt_replay",
     "seq": 4,
     "provider": "codex",
@@ -48,7 +48,7 @@
     "createdAt": "2026-09-06T00:00:04Z"
   },
   {
-    "schemaVersion": "xgc.native-agent/v1",
+    "schemaVersion": "xgc.agent-runtime/v1",
     "sessionId": "s_prompt_replay",
     "seq": 5,
     "provider": "codex",
@@ -58,15 +58,15 @@
     "role": "assistant",
     "sourceMethod": "item/started",
     "createdAt": "2026-09-06T00:00:05Z",
-    "nativeThreadId": "thread-fixture",
-    "nativeTurnId": "turn-fixture",
+    "providerThreadId": "thread-fixture",
+    "providerTurnId": "turn-fixture",
     "details": {
       "phase": "final_answer",
       "type": "agentMessage"
     }
   },
   {
-    "schemaVersion": "xgc.native-agent/v1",
+    "schemaVersion": "xgc.agent-runtime/v1",
     "sessionId": "s_prompt_replay",
     "seq": 6,
     "provider": "codex",
@@ -77,11 +77,11 @@
     "text": "Fixture reply",
     "sourceMethod": "item/agentMessage/delta",
     "createdAt": "2026-09-06T00:00:06Z",
-    "nativeThreadId": "thread-fixture",
-    "nativeTurnId": "turn-fixture"
+    "providerThreadId": "thread-fixture",
+    "providerTurnId": "turn-fixture"
   },
   {
-    "schemaVersion": "xgc.native-agent/v1",
+    "schemaVersion": "xgc.agent-runtime/v1",
     "sessionId": "s_prompt_replay",
     "seq": 7,
     "provider": "codex",
@@ -93,15 +93,15 @@
     "status": "completed",
     "sourceMethod": "item/completed",
     "createdAt": "2026-09-06T00:00:07Z",
-    "nativeThreadId": "thread-fixture",
-    "nativeTurnId": "turn-fixture",
+    "providerThreadId": "thread-fixture",
+    "providerTurnId": "turn-fixture",
     "details": {
       "phase": "final_answer",
       "type": "agentMessage"
     }
   },
   {
-    "schemaVersion": "xgc.native-agent/v1",
+    "schemaVersion": "xgc.agent-runtime/v1",
     "sessionId": "s_prompt_replay",
     "seq": 8,
     "provider": "codex",
@@ -110,11 +110,11 @@
     "status": "completed",
     "sourceMethod": "turn/completed",
     "createdAt": "2026-09-06T00:00:08Z",
-    "nativeThreadId": "thread-fixture",
-    "nativeTurnId": "turn-fixture"
+    "providerThreadId": "thread-fixture",
+    "providerTurnId": "turn-fixture"
   },
   {
-    "schemaVersion": "xgc.native-agent/v1",
+    "schemaVersion": "xgc.agent-runtime/v1",
     "sessionId": "s_prompt_replay",
     "seq": 9,
     "provider": "codex",

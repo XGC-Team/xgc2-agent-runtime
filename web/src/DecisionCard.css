@@ -47,7 +47,7 @@
 .xgc-decision-card ::selection { color: var(--xgc-decision-bg); background: var(--xgc-decision-fg); }
 
 /* Native controls consume T3 aliases; the shared host tokens remain untouched. */
-.xgc-native-chat .xgc-decision-card {
+.xgc-agent-chat .xgc-decision-card {
   --foreground: var(--xgc-decision-fg);
   --contrast-muted-foreground: var(--xgc-decision-muted);
   --contrast-secondary-foreground: var(--xgc-decision-fg);

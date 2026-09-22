@@ -2,15 +2,15 @@ import { useMemo, type ReactNode } from 'react'
 import { T3Conversation, T3PendingRequests } from './T3Conversation.js'
 import { DecisionCard, type DecisionCardState } from './DecisionCard.js'
 import { StaleApprovalNotice } from './StaleApprovalNotice.js'
-import { optimisticTimelineItems, type NativeOptimisticMessage } from './optimisticMessages.js'
-import type { NativeTimelineState } from './timelineState.js'
-import type { NativeAnswer, NativeRequest, NativeDecisionRecord, StreamState } from './state.js'
+import { optimisticTimelineItems, type AgentOptimisticMessage } from './optimisticMessages.js'
+import type { AgentTimelineState } from './timelineState.js'
+import type { AgentAnswer, AgentRequest, AgentDecisionRecord, StreamState } from './state.js'
 import { emptyStream } from './state.js'
-import { nativeApprovalAnswer, nativeCancelAnswer, nativeConversationModel, nativeQuestionAnswer, nativeRequestPresentation, type NativeLocale } from './nativePresentation.js'
+import { nativeApprovalAnswer, nativeCancelAnswer, nativeConversationModel, nativeQuestionAnswer, nativeRequestPresentation, type AgentLocale } from './agentPresentation.js'
 import type { TimelineItem } from './upstream/t3/types.js'
 
-export type { NativeLocale } from './nativePresentation.js'
-export type NativeConversationProps = {
+export type { AgentLocale } from './agentPresentation.js'
+export type AgentConversationProps = {
   state: StreamState
   active?: boolean
   disabled?: boolean
@@ -22,46 +22,46 @@ export type NativeConversationProps = {
   renderApprovalControls?: (requestId:string) => ReactNode
   onSend?: (text: string) => Promise<unknown>
   onInterrupt?: () => Promise<unknown>
-  onAnswer: (requestId: string, answer: NativeAnswer) => Promise<unknown>
+  onAnswer: (requestId: string, answer: AgentAnswer) => Promise<unknown>
   additionalItems?: readonly TimelineItem[]
   /** A projection of the existing host queue/outbox, never a second journal. */
-  optimisticMessages?: readonly NativeOptimisticMessage[]
+  optimisticMessages?: readonly AgentOptimisticMessage[]
   onRetryOptimisticMessage?: (id: string) => Promise<unknown>
   onRefreshRequests?: () => Promise<unknown>
   staleRequestIds?: readonly string[]
-  timelineState?: NativeTimelineState
-  onTimelineStateChange?: (state: NativeTimelineState) => void
+  timelineState?: AgentTimelineState
+  onTimelineStateChange?: (state: AgentTimelineState) => void
   /** Persistent hosts clear their captured draft only when admission succeeds. */
   clearDraftOnSend?: boolean
   /** Host decisions share the bounded request area; resolved receipts belong in the timeline. */
   additionalPendingRequests?: ReactNode
   draft?: string
   onDraftChange?: (draft: string) => void
-  locale?: NativeLocale
+  locale?: AgentLocale
   composerControls?: ReactNode
   dock?: ReactNode
   emptyState?: ReactNode
 }
 
 const EMPTY_TIMELINE_ITEMS: readonly TimelineItem[] = []
-const EMPTY_OPTIMISTIC_MESSAGES: readonly NativeOptimisticMessage[] = []
+const EMPTY_OPTIMISTIC_MESSAGES: readonly AgentOptimisticMessage[] = []
 
 /** Shared native presentation adapter. Transport, ownership and authorizations stay with the host. */
-export function NativeConversation({ state, active = true, disabled = false, sendDisabled, sendDisabledReason, queueEnabled, error, renderApprovalControls, onSend, onInterrupt, onAnswer, additionalItems = EMPTY_TIMELINE_ITEMS, additionalPendingRequests, draft, onDraftChange, locale = 'en', composerControls, dock, emptyState,
-  optimisticMessages = EMPTY_OPTIMISTIC_MESSAGES, onRetryOptimisticMessage, onRefreshRequests, staleRequestIds, timelineState, onTimelineStateChange, clearDraftOnSend }: NativeConversationProps) {
+export function AgentConversation({ state, active = true, disabled = false, sendDisabled, sendDisabledReason, queueEnabled, error, renderApprovalControls, onSend, onInterrupt, onAnswer, additionalItems = EMPTY_TIMELINE_ITEMS, additionalPendingRequests, draft, onDraftChange, locale = 'en', composerControls, dock, emptyState,
+  optimisticMessages = EMPTY_OPTIMISTIC_MESSAGES, onRetryOptimisticMessage, onRefreshRequests, staleRequestIds, timelineState, onTimelineStateChange, clearDraftOnSend }: AgentConversationProps) {
   const nativeModel = useMemo(() => nativeConversationModel(state, locale), [state, locale])
   const optimistic = useMemo(() => optimisticTimelineItems(state.sessionId, state.items, optimisticMessages, locale, onRetryOptimisticMessage),
     [state.sessionId, state.items, optimisticMessages, locale, onRetryOptimisticMessage])
   const model = useMemo(() => {
     const failures: TimelineItem[] = Object.entries(state.turnFailures ?? {}).map(([turnId, failure]) => ({
       kind: 'custom', id: `failure:${state.sessionId}:${turnId}`, createdAt: failure.createdAt,
-      content: <div role="alert" className="px-1 py-0.5 text-sm text-destructive" data-xgc-role="native-agent-turn-error" data-xgc-id={`${state.sessionId}:${turnId}`}>
-        {failure.message || (locale === 'zh' ? '此轮回复失败，原生 Agent 未提供具体原因。' : 'This response failed. The native agent did not provide a reason.')}
+      content: <div role="alert" className="px-1 py-0.5 text-sm text-destructive" data-xgc-role="agent-turn-error" data-xgc-id={`${state.sessionId}:${turnId}`}>
+        {failure.message || (locale === 'zh' ? '此轮回复失败，供应者未提供具体原因。' : 'This response failed. The provider did not provide a reason.')}
       </div>,
     }))
     const decisions: TimelineItem[] = Object.values(state.decisions).filter((record) => record.status === 'answered' || record.status === 'expired')
       .map((record) => ({ kind: 'custom', id: `decision:${state.sessionId}:${record.request.id}`, createdAt: record.request.createdAt,
-        content: <NativeDecisionHistory sessionId={state.sessionId} record={record} locale={locale} onRefresh={onRefreshRequests} /> }))
+        content: <AgentDecisionHistory sessionId={state.sessionId} record={record} locale={locale} onRefresh={onRefreshRequests} /> }))
     return { ...nativeModel, items: mergeTimelineItems(nativeModel.items, [...decisions, ...failures, ...additionalItems, ...optimistic]) }
   }, [nativeModel, state.decisions, state.turnFailures, state.sessionId, locale, additionalItems, optimistic, onRefreshRequests])
   return <T3Conversation key={state.sessionId} model={model}
@@ -75,8 +75,8 @@ export function NativeConversation({ state, active = true, disabled = false, sen
     onCancelRequest={(requestId) => onAnswer(requestId, nativeCancelAnswer(state, requestId))} />
 }
 
-export function NativeInput({ request, submitted, onAnswer, sessionId = '', active = true, locale = 'en', renderApprovalControls, onRefreshRequests }: {
-  request: NativeRequest; submitted: boolean; onAnswer: (answer: NativeAnswer) => Promise<unknown>; sessionId?: string; locale?: NativeLocale; active?: boolean
+export function AgentInput({ request, submitted, onAnswer, sessionId = '', active = true, locale = 'en', renderApprovalControls, onRefreshRequests }: {
+  request: AgentRequest; submitted: boolean; onAnswer: (answer: AgentAnswer) => Promise<unknown>; sessionId?: string; locale?: AgentLocale; active?: boolean
   renderApprovalControls?: (requestId:string) => ReactNode
   onRefreshRequests?: () => Promise<unknown>
 }) {
@@ -89,7 +89,7 @@ export function NativeInput({ request, submitted, onAnswer, sessionId = '', acti
     onCancelRequest={(requestId) => onAnswer(nativeCancelAnswer(state, requestId))} />
 }
 
-function NativeDecisionHistory({ sessionId, record, locale, onRefresh }: { sessionId: string; record: NativeDecisionRecord; locale: NativeLocale; onRefresh?: () => Promise<unknown> }) {
+function AgentDecisionHistory({ sessionId, record, locale, onRefresh }: { sessionId: string; record: AgentDecisionRecord; locale: AgentLocale; onRefresh?: () => Promise<unknown> }) {
   const approval = nativeRequestPresentation({ ...record.request, submitted: true }, locale).approval
   if (!approval) return null
   const outcome = record.decision?.outcome
@@ -102,9 +102,9 @@ function NativeDecisionHistory({ sessionId, record, locale, onRefresh }: { sessi
   const status = [labels[state], actor, record.status === 'expired' && choice ? `${locale === 'zh' ? '此前回复' : 'Earlier response'}: ${choice}` : ''].filter(Boolean).join(' · ')
   const identity = `${sessionId}:${record.request.id}`
   return <DecisionCard identity={identity} title={approval.title} timestamp={record.updatedAt} state={state} status={status}
-    data-xgc-role="native-agent-decision-history" data-xgc-id={identity}
+    data-xgc-role="agent-decision-history" data-xgc-id={identity}
     detailsLabel={locale === 'zh' ? '详情' : 'Details'}
-    details={approval.detail ? <pre className="xgc-decision-card-review" data-xgc-role="native-agent-approval-review" data-xgc-id={identity}>{approval.detail}</pre> : undefined}>
+    details={approval.detail ? <pre className="xgc-decision-card-review" data-xgc-role="agent-approval-review" data-xgc-id={identity}>{approval.detail}</pre> : undefined}>
     <StaleApprovalNotice identity={identity} open={false} missing={record.status === 'expired' && !record.decision}
       locale={locale} onRefresh={onRefresh} />
     {approval.detail ? <p className="m-0 truncate font-mono text-xs" title={approval.detail.split('\n')[0]}>{approval.detail.split('\n')[0]}</p> : null}

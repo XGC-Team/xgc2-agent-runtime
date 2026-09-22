@@ -1,4 +1,4 @@
-package nativeagent
+package agentruntime
 
 import (
 	"bufio"
@@ -213,7 +213,7 @@ func startChild(p Profile, args []string, cwd string, delegatedEnvironment ...st
 	}
 	c := exec.Command(p.Executable, args...)
 	c.Dir = cwd
-	c.Env = append(NativeEnvironment(os.Environ()), delegatedEnvironment...)
+	c.Env = append(AgentEnvironment(os.Environ()), delegatedEnvironment...)
 	c.Stderr = io.Discard
 	isolateProcess(c)
 	input, err := c.StdinPipe()

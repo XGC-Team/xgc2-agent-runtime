@@ -10,13 +10,13 @@ import { Combobox, ComboboxInput, ComboboxItem, ComboboxList } from './ui/combob
 import { Tooltip, TooltipPopup, TooltipTrigger } from './ui/tooltip.js';
 import { ClaudeAI, CursorIcon, GrokIcon, OpenAI, OpenCodeIcon } from './ProviderIcons.js';
 import { scoreModelPickerSearch } from './modelPickerSearch.js';
-import type { NativeProvider } from '../../state.js';
-import type { NativeProviderConfiguration } from '../../providerSettings.js';
+import type { AgentProvider } from '../../state.js';
+import type { AgentProviderConfiguration } from '../../providerSettings.js';
 
-export const providerLabels: Record<NativeProvider, string> = { codex: 'Codex', claude: 'Claude', cursor: 'Cursor', grok: 'Grok', opencode: 'OpenCode' };
+export const providerLabels: Record<AgentProvider, string> = { codex: 'Codex', claude: 'Claude', cursor: 'Cursor', grok: 'Grok', opencode: 'OpenCode' };
 export const providerIcons = { codex: OpenAI, claude: ClaudeAI, cursor: CursorIcon, grok: GrokIcon, opencode: OpenCodeIcon };
 export function ProviderModelPicker({ providers, profileId, model, disabled = false, onChange, locale = 'en', identityId }: {
-  identityId?: string; locale?: 'en' | 'zh'; providers: readonly NativeProviderConfiguration[]; profileId: string; model?: string; disabled?: boolean;
+  identityId?: string; locale?: 'en' | 'zh'; providers: readonly AgentProviderConfiguration[]; profileId: string; model?: string; disabled?: boolean;
   onChange: (profileId: string, model: string) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -28,7 +28,7 @@ export function ProviderModelPicker({ providers, profileId, model, disabled = fa
   const available = providers.filter(item => item.enabled && item.available && item.models.length > 0);
   return <Popover open={open && !disabled} onOpenChange={value => setOpen(!disabled && value)}>
     <PopoverTrigger render={<ComposerControl type="button" aria-label={locale === 'zh' ? '工作者与模型' : 'Provider and model'} disabled={disabled}
-      data-chat-provider-model-picker="true" data-xgc-role="native-composer-model" data-xgc-id={identityId ? `${identityId}:${profileId || 'unselected'}` : profileId || 'unselected'}
+      data-chat-provider-model-picker="true" data-xgc-role="agent-composer-model" data-xgc-id={identityId ? `${identityId}:${profileId || 'unselected'}` : profileId || 'unselected'}
       className="min-w-0 max-w-48 flex-1 shrink justify-between overflow-hidden whitespace-nowrap sm:max-w-56" />}>
       <span className="flex min-w-0 flex-1 items-center gap-1.5">
         {Icon ? <Icon className="size-4 shrink-0" aria-hidden="true" /> : null}
@@ -46,7 +46,7 @@ export function ProviderModelPicker({ providers, profileId, model, disabled = fa
   </Popover>;
 }
 function ModelPickerContent({ providers, profileId, model, onClose, onChange, locale, identityId }: {
-  identityId?: string; locale: 'en' | 'zh'; providers: readonly NativeProviderConfiguration[]; profileId: string; model?: string;
+  identityId?: string; locale: 'en' | 'zh'; providers: readonly AgentProviderConfiguration[]; profileId: string; model?: string;
   onClose: () => void; onChange: (profileId: string, model: string) => void;
 }) {
   const [selectedProfile, setSelectedProfile] = useState(providers.some(item => item.id === profileId) ? profileId : providers[0]?.id);
@@ -63,7 +63,7 @@ function ModelPickerContent({ providers, profileId, model, onClose, onChange, lo
       <div className="h-full overflow-y-auto overscroll-contain"><div className="relative flex min-h-full flex-col gap-1 p-1">
         {providers.map(provider => { const Icon = providerIcons[provider.provider]; return <Tooltip key={provider.id}>
           <TooltipTrigger render={<button type="button" aria-label={providerLabels[provider.provider]} aria-pressed={selectedProfile === provider.id}
-            data-model-picker-provider={provider.id} data-xgc-role="native-composer-provider-option" data-xgc-id={identityId ? `${identityId}:${provider.id}` : provider.id}
+            data-model-picker-provider={provider.id} data-xgc-role="agent-composer-provider-option" data-xgc-id={identityId ? `${identityId}:${provider.id}` : provider.id}
             className="relative isolate flex aspect-square w-full cursor-pointer items-center justify-center rounded-md transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:outline-none aria-pressed:bg-accent"
             onClick={() => { setSelectedProfile(provider.id); setQuery(''); }} />}><Icon className="size-5 shrink-0" aria-hidden="true" /></TooltipTrigger>
           <TooltipPopup side="left" sideOffset={8}>{providerLabels[provider.provider]}</TooltipPopup>
@@ -76,7 +76,7 @@ function ModelPickerContent({ providers, profileId, model, onClose, onChange, lo
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-l border-border/70 bg-muted/40">
         <div className="px-2 pt-2"><div className="border-b border-border/70 pb-2.5 transition-colors focus-within:border-ring">
           <ComboboxInput className="[&_input]:h-6.5 [&_input]:font-sans [&_input]:leading-6.5" inputClassName="rounded-none bg-transparent text-sm"
-            placeholder={locale === 'zh' ? '搜索模型…' : 'Search models...'} aria-label={locale === 'zh' ? '搜索模型' : 'Search models'} data-xgc-role="native-composer-model-search" data-xgc-id={identityId ? `${identityId}:models` : 'models'}
+            placeholder={locale === 'zh' ? '搜索模型…' : 'Search models...'} aria-label={locale === 'zh' ? '搜索模型' : 'Search models'} data-xgc-role="agent-composer-model-search" data-xgc-id={identityId ? `${identityId}:models` : 'models'}
             showTrigger={false} startAddon={<SearchIcon className="size-4 shrink-0 text-muted-foreground" />} value={query} onChange={event => setQuery(event.target.value)}
             onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape') { event.preventDefault(); onClose(); }
               if (event.key === 'Enter') { event.preventDefault(); (event as typeof event & { preventBaseUIHandler?: () => void }).preventBaseUIHandler?.(); if (!event.nativeEvent.isComposing && highlighted.current) select(highlighted.current); } }}
@@ -84,7 +84,7 @@ function ModelPickerContent({ providers, profileId, model, onClose, onChange, lo
         </div></div>
         <ComboboxList className="min-h-0 min-w-0 flex-1 overflow-y-auto p-1">
           {filtered.map((row, index) => <ComboboxItem key={row.key} value={row.key} index={index} hideIndicator
-            data-xgc-role="native-composer-model-option" data-xgc-id={`${identityId ? `${identityId}:` : ''}${row.provider.id}:${row.model.id}`}
+            data-xgc-role="agent-composer-model-option" data-xgc-id={`${identityId ? `${identityId}:` : ''}${row.provider.id}:${row.model.id}`}
             contentClassName="flex w-full items-center gap-3"
             className="group relative w-full !min-w-0 max-w-full cursor-pointer rounded-md px-2 py-2 transition-[background-color,box-shadow,color] hover:bg-muted data-highlighted:bg-muted data-selected:bg-foreground/[0.08] data-selected:text-foreground data-selected:ring-0">
             <div className="min-w-0 flex-1 text-left"><div className="flex min-w-0 items-center gap-2"><div className="min-w-0 truncate text-xs font-medium leading-snug">{row.model.label}</div></div>

@@ -5,7 +5,7 @@
 @import "./t3-upstream.css";
 @source "./upstream";
 @source "./T3Conversation.tsx";
-@source "./NativeComposerControls.tsx";
-@source "./NativeProviderSettings.tsx";
+@source "./AgentComposerControls.tsx";
+@source "./AgentProviderSettings.tsx";
 @custom-variant dark (&:where([data-skin=dark], [data-skin=dark] *));
 @custom-variant light (&:where([data-skin=light], [data-skin=light] *));

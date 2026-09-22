@@ -1,4 +1,4 @@
-package nativeagent
+package agentruntime
 
 import (
 	"crypto/sha256"

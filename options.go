@@ -1,4 +1,4 @@
-package nativeagent
+package agentruntime
 
 import (
 	"context"
@@ -6,15 +6,15 @@ import (
 	"errors"
 )
 
-// NativeOptions are selections from the provider's discovered capabilities.
+// AgentOptions are selections from the provider's discovered capabilities.
 // Empty values preserve the session snapshot; no model alias or fallback is invented.
-type NativeOptions struct {
+type AgentOptions struct {
 	Model      string `json:"model,omitempty"`
 	Effort     string `json:"effort,omitempty"`
 	Permission string `json:"permission,omitempty"`
 }
 
-func mergeOptions(base, override NativeOptions) NativeOptions {
+func mergeOptions(base, override AgentOptions) AgentOptions {
 	if override.Model != "" {
 		if override.Model != base.Model {
 			base.Effort = ""
@@ -31,7 +31,7 @@ func mergeOptions(base, override NativeOptions) NativeOptions {
 }
 
 type optionDriver interface {
-	PromptWithOptions(context.Context, string, string, NativeOptions) error
+	PromptWithOptions(context.Context, string, string, AgentOptions) error
 }
 
 // Adapted from T3 Code CodexSessionRuntime.ts at 6349a0e68a958cc51b7b5198683c1d1db88b8d28.
@@ -50,7 +50,7 @@ func codexPermissions(permission string) (approval, sandbox, turnSandbox string,
 		return "", "", "", errors.New("unsupported native permission")
 	}
 }
-func codexThreadOptions(params map[string]any, o NativeOptions) error {
+func codexThreadOptions(params map[string]any, o AgentOptions) error {
 	a, s, _, err := codexPermissions(o.Permission)
 	if err != nil {
 		return err
@@ -66,7 +66,7 @@ func codexThreadOptions(params map[string]any, o NativeOptions) error {
 	}
 	return nil
 }
-func codexTurnOptions(params map[string]any, o NativeOptions) error {
+func codexTurnOptions(params map[string]any, o AgentOptions) error {
 	a, _, s, err := codexPermissions(o.Permission)
 	if err != nil {
 		return err
@@ -83,23 +83,23 @@ func codexTurnOptions(params map[string]any, o NativeOptions) error {
 	return nil
 }
 
-func promptFingerprint(prompt string, options NativeOptions) string {
-	if options == (NativeOptions{}) {
+func promptFingerprint(prompt string, options AgentOptions) string {
+	if options == (AgentOptions{}) {
 		return hash(prompt)
 	}
 	encoded, _ := json.Marshal(options)
 	return hash(prompt + "\x00native-options\x00" + string(encoded))
 }
-func promptDetails(options NativeOptions) map[string]any {
-	if options == (NativeOptions{}) {
+func promptDetails(options AgentOptions) map[string]any {
+	if options == (AgentOptions{}) {
 		return nil
 	}
 	encoded, _ := json.Marshal(options)
 	var value map[string]any
 	_ = json.Unmarshal(encoded, &value)
-	return map[string]any{"type": "userMessage", "nativeOptions": value}
+	return map[string]any{"type": "userMessage", "providerOptions": value}
 }
-func optionsFromDetails(details map[string]any) NativeOptions {
-	value := obj(details["nativeOptions"])
-	return NativeOptions{Model: text(value, "model"), Effort: text(value, "effort"), Permission: text(value, "permission")}
+func optionsFromDetails(details map[string]any) AgentOptions {
+	value := obj(details["providerOptions"])
+	return AgentOptions{Model: text(value, "model"), Effort: text(value, "effort"), Permission: text(value, "permission")}
 }

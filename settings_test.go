@@ -14,12 +14,13 @@ import (
 func settingsBroker(t *testing.T, settings *Store) *Broker {
 	t.Helper()
 	root := t.TempDir()
+	files := testNativeFiles(t)
 	b, err := NewBroker(testStorage(t), nil, func(context.Context, Create, string, bool) (string, error) { return root, nil }, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { b.Close() })
-	if err = ConfigureBroker(b, BrokerOptions{Settings: settings}); err != nil {
+	if err = ConfigureBroker(b, BrokerOptions{Settings: settings, NativeFiles: files}); err != nil {
 		t.Fatal(err)
 	}
 	return b
@@ -288,7 +289,7 @@ func TestRestartKeepsPrivateProfileSnapshotAndReplaySkipsDiscovery(t *testing.T)
 		t.Fatal(err)
 	}
 	defer restored.Close()
-	if err = ConfigureBroker(restored, BrokerOptions{Settings: settings}); err != nil {
+	if err = ConfigureBroker(restored, BrokerOptions{Settings: settings, NativeFiles: testNativeFiles(t)}); err != nil {
 		t.Fatal(err)
 	}
 	info, err := restored.Get(s.ID)

@@ -133,13 +133,13 @@ func TestClaudeLocalMCPFreshAndResumeNativeContracts(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err = driver.Open(context.Background(), t.TempDir(), native); err != nil {
+				if err = driver.Open(testNativeContext(t), t.TempDir(), native); err != nil {
 					t.Fatal(err)
 				}
 				if scenario.options == (AgentOptions{}) {
-					err = driver.Prompt(context.Background(), "turn", "inspect the experiment")
+					err = driver.Prompt(testNativeContext(t), "turn", "inspect the experiment")
 				} else {
-					err = driver.(optionDriver).PromptWithOptions(context.Background(), "turn", "inspect the experiment", scenario.options)
+					err = driver.(optionDriver).PromptWithOptions(testNativeContext(t), "turn", "inspect the experiment", scenario.options)
 				}
 				_ = driver.Close()
 				if err != nil {
@@ -210,7 +210,7 @@ func TestClaudeLocalMCPUnsupportedCLIAndFailedStartCleanup(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err = driver.Open(context.Background(), t.TempDir(), ""); err == nil || !strings.Contains(err.Error(), "does not support host-owned MCP") {
+		if err = driver.Open(testNativeContext(t), t.TempDir(), ""); err == nil || !strings.Contains(err.Error(), "does not support host-owned MCP") {
 			t.Fatalf("unsupported CLI did not fail explicitly: %v", err)
 		}
 	}

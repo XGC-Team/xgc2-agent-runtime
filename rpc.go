@@ -198,22 +198,33 @@ func (p *rpcPeer) finish()      { p.once.Do(func() { p.cancel(); close(p.done) }
 func (p *rpcPeer) Close() error { p.finish(); return p.input.Close() }
 
 type child struct {
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout io.ReadCloser
-	done   chan struct{}
-	mu     sync.Mutex
-	err    error
-	once   sync.Once
+	cmd     *exec.Cmd
+	stdin   io.WriteCloser
+	stdout  io.ReadCloser
+	done    chan struct{}
+	mu      sync.Mutex
+	err     error
+	once    sync.Once
+	cleanup func() error
 }
 
-func startChild(p Profile, args []string, cwd string, delegatedEnvironment ...string) (*child, error) {
+func startChild(ctx context.Context, p Profile, args []string, cwd string, delegatedEnvironment ...string) (*child, error) {
 	if err := checkExecutable(p); err != nil {
 		return nil, err
 	}
 	c := exec.Command(p.Executable, args...)
+	environment, _, cleanup, err := nativeLaunch(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	started := false
+	defer func() {
+		if !started {
+			_ = cleanup()
+		}
+	}()
 	c.Dir = cwd
-	c.Env = append(AgentEnvironment(os.Environ()), delegatedEnvironment...)
+	c.Env = append(append(AgentEnvironment(os.Environ()), environment...), delegatedEnvironment...)
 	c.Stderr = io.Discard
 	isolateProcess(c)
 	input, err := c.StdinPipe()
@@ -230,13 +241,20 @@ func startChild(p Profile, args []string, cwd string, delegatedEnvironment ...st
 		output.Close()
 		return nil, errors.New("executable could not start")
 	}
-	return &child{cmd: c, stdin: input, stdout: output, done: make(chan struct{})}, nil
+	started = true
+	return &child{cmd: c, stdin: input, stdout: output, done: make(chan struct{}), cleanup: cleanup}, nil
 }
 
 // Wait must be called after stdout has been drained; exec.Wait can otherwise
 // close the stdout pipe before the reader consumes the terminal protocol frame.
 func (c *child) Wait() error {
-	c.once.Do(func() { err := c.cmd.Wait(); c.mu.Lock(); c.err = err; c.mu.Unlock(); close(c.done) })
+	c.once.Do(func() {
+		err := errors.Join(c.cmd.Wait(), c.cleanup())
+		c.mu.Lock()
+		c.err = err
+		c.mu.Unlock()
+		close(c.done)
+	})
 	<-c.done
 	c.mu.Lock()
 	defer c.mu.Unlock()

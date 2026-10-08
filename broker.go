@@ -65,7 +65,10 @@ type Broker struct {
 	decisionEvaluator DecisionEvaluator
 }
 
-func NewBroker(store *Store, profiles []Profile, prepare Prepare, factory Factory) (*Broker, error) {
+func NewBroker(store *Store, profiles []Profile, prepare Prepare, factory Factory, files ...*NativeFiles) (*Broker, error) {
+	if len(files) > 1 {
+		return nil, errors.New("one host native file capability required")
+	}
 	if store == nil || prepare == nil {
 		return nil, errors.New("storage and workspace preparation are required")
 	}
@@ -73,6 +76,9 @@ func NewBroker(store *Store, profiles []Profile, prepare Prepare, factory Factor
 		factory = NewDriver
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	if len(files) == 1 && files[0] != nil {
+		ctx = WithNativeFiles(ctx, files[0])
+	}
 	b := &Broker{ctx: ctx, cancel: cancel, store: store, profiles: map[string]Profile{}, sessions: map[string]*liveSession{}, prepare: prepare, factory: factory}
 	for _, p := range profiles {
 		if _, ok := b.profiles[p.ID]; ok {

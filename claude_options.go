@@ -276,10 +276,11 @@ func (d *claudeDriver) promptWithControl(ctx context.Context, turn, prompt strin
 		return err
 	}
 	defer cleanup()
-	child, err := startChild(d.profile, args, cwd, environment...)
+	child, err := startChild(ctx, d.profile, args, cwd, environment...)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = child.stdout.Close(); child.Stop(); _ = child.Wait() }()
 	d.mu.Lock()
 	d.process = child
 	d.cancelled = false

@@ -127,7 +127,7 @@ func checkExecutable(p Profile) error {
 // service's API keys, tokens, endpoint overrides and service credentials are
 // never inherited. This does not inspect or certify the CLI's own billing config.
 func AgentEnvironment(source []string) []string {
-	allowed := map[string]bool{"PATH": true, "HOME": true, "USER": true, "LOGNAME": true, "SHELL": true, "LANG": true, "LC_ALL": true, "TMPDIR": true, "SYSTEMROOT": true, "WINDIR": true, "USERPROFILE": true, "LOCALAPPDATA": true, "APPDATA": true}
+	allowed := map[string]bool{"PATH": true, "USER": true, "LOGNAME": true, "SHELL": true, "LANG": true, "LC_ALL": true, "SYSTEMROOT": true, "WINDIR": true}
 	result := []string{}
 	for _, v := range source {
 		k, _, ok := strings.Cut(v, "=")

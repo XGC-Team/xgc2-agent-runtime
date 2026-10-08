@@ -168,7 +168,7 @@ func scope(profile string) Create {
 func testBroker(t *testing.T, provider string) (*Broker, Session) {
 	t.Helper()
 	root := t.TempDir()
-	b, err := NewBroker(testStorage(t), []Profile{testProfile(t, provider)}, func(ctx context.Context, c Create, id string, fresh bool) (string, error) { return root, ctx.Err() }, nil)
+	b, err := NewBroker(testStorage(t), []Profile{testProfile(t, provider)}, func(ctx context.Context, c Create, id string, fresh bool) (string, error) { return root, ctx.Err() }, nil, testNativeFiles(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -357,7 +357,7 @@ func TestJournalRestartReplaysWithoutPromptResend(t *testing.T) {
 	cursor := events[len(events)-1].Seq
 	root, profiles, prepare := b.store, []Profile{testProfile(t, "claude")}, b.prepare
 	b.Close()
-	recovered, err := NewBroker(root, profiles, prepare, nil)
+	recovered, err := NewBroker(root, profiles, prepare, nil, b.ctx.Value(nativeFilesKey{}).(*NativeFiles))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -389,7 +389,7 @@ func TestJournalRestartReplaysWithoutPromptResend(t *testing.T) {
 }
 func TestConfigAndEnvironmentNeverAcceptCredentials(t *testing.T) {
 	got := AgentEnvironment([]string{"HOME=/private/home", "PATH=/bin", "OPENAI_API_KEY=secret", "ANTHROPIC_AUTH_TOKEN=secret", "XAI_API_KEY=secret", "CURSOR_API_KEY=secret", "CODEX_HOME=/other", "RESEARCH_OS_SECRET=secret"})
-	if len(got) != 2 {
+	if len(got) != 1 {
 		t.Fatalf("environment=%v", got)
 	}
 	for _, provider := range []string{"codex", "cursor", "grok", "opencode", "claude"} {

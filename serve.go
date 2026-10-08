@@ -10,6 +10,7 @@ import (
 type OpenOptions struct {
 	Storage           *Store
 	Settings          *Store
+	NativeFiles       *NativeFiles
 	BasePath          string
 	Prepare           Prepare
 	Factory           Factory
@@ -24,7 +25,7 @@ func Open(mux *http.ServeMux, options OpenOptions) (*Broker, error) {
 	if err != nil {
 		return nil, err
 	}
-	broker, err := NewBroker(options.Storage, profiles, options.Prepare, options.Factory)
+	broker, err := NewBroker(options.Storage, profiles, options.Prepare, options.Factory, options.NativeFiles)
 	if err != nil {
 		return nil, err
 	}

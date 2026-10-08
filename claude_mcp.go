@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -47,11 +46,11 @@ func claudeLocalMCPLaunch(ctx context.Context, args []string) ([]string, []strin
 	if err := server.validate(); err != nil {
 		return nil, nil, noop, err
 	}
-	directory, err := os.MkdirTemp("", "xgc-native-claude-mcp-")
+	lease, err := nativeScratch(ctx, "native-mcp", 4096, 1)
 	if err != nil {
 		return nil, nil, noop, errors.New("cannot create private Claude MCP configuration")
 	}
-	cleanup := func() { _ = os.RemoveAll(directory) }
+	cleanup := func() { _ = lease.Close() }
 	config := map[string]any{"mcpServers": map[string]any{server.Name: map[string]any{
 		"type": "http", "url": server.URL,
 		"headers": map[string]string{"Authorization": "Bearer ${" + mcpBearerEnvironment + "}"},
@@ -61,8 +60,8 @@ func claudeLocalMCPLaunch(ctx context.Context, args []string) ([]string, []strin
 		cleanup()
 		return nil, nil, noop, errors.New("cannot encode private Claude MCP configuration")
 	}
-	path := filepath.Join(directory, "mcp.json")
-	if err = os.WriteFile(path, data, 0600); err != nil {
+	path := filepath.Join(lease.Path(), "mcp.json")
+	if err = lease.WriteFile("mcp.json", data); err != nil {
 		cleanup()
 		return nil, nil, noop, errors.New("cannot write private Claude MCP configuration")
 	}

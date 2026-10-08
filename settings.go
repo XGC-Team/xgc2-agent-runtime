@@ -64,7 +64,10 @@ type SettingsUpdate struct {
 	Revision string         `json:"revision"`
 	Provider ProviderUpdate `json:"provider"`
 }
-type BrokerOptions struct{ Settings *Store }
+type BrokerOptions struct {
+	Settings    *Store
+	NativeFiles *NativeFiles
+}
 type settingsState struct {
 	store     *Store
 	mu        sync.Mutex
@@ -82,6 +85,9 @@ func ConfigureBroker(b *Broker, options BrokerOptions) error {
 		return errors.New("settings are already configured")
 	}
 	b.settings = &settingsState{store: options.Settings, inventory: map[string]ProviderSetting{}}
+	if options.NativeFiles != nil {
+		b.ctx = WithNativeFiles(b.ctx, options.NativeFiles)
+	}
 	return nil
 }
 
@@ -258,7 +264,7 @@ func (b *Broker) RefreshSettings(ctx context.Context, id string) (Settings, erro
 	if err != nil {
 		return Settings{}, err
 	}
-	inventory := inspectProvider(ctx, profile)
+	inventory := inspectProvider(b.fileContext(ctx), profile)
 	s := b.settings
 	s.mu.Lock()
 	s.inventory[profile.Executable+":"+profile.SHA256] = inventory
@@ -317,7 +323,7 @@ func (b *Broker) UpdateSettings(ctx context.Context, input SettingsUpdate) (Sett
 		if exists && cached.Version != "" {
 			inventory = cached
 		} else {
-			inventory = inspectProvider(ctx, profile)
+			inventory = inspectProvider(b.fileContext(ctx), profile)
 		}
 	}
 	if err := ctx.Err(); err != nil {
@@ -419,7 +425,7 @@ func (b *Broker) warmSelection(ctx context.Context, p Profile) {
 	if ok {
 		return
 	}
-	inventory := inspectProvider(ctx, p)
+	inventory := inspectProvider(b.fileContext(ctx), p)
 	s.mu.Lock()
 	s.inventory[p.Executable+":"+p.SHA256] = inventory
 	s.mu.Unlock()
@@ -463,15 +469,20 @@ func cliOutput(ctx context.Context, p Profile, args ...string) ([]byte, error) {
 		args = append([]string{"--no-auto-update"}, args...)
 	}
 	cmd := exec.CommandContext(ctx, p.Executable, args...)
-	cmd.Env = AgentEnvironment(os.Environ())
+	environment, lease, cleanup, err := nativeLaunch(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	cmd.Dir = lease.Path()
+	cmd.Env = append(AgentEnvironment(os.Environ()), environment...)
 	isolateProcess(cmd)
 	cmd.WaitDelay = 2 * time.Second
 	cmd.Cancel = func() error { return terminateProcess(cmd, true) }
 	cmd.Stderr = io.Discard
 	out := &limitedOutput{limit: 1 << 20}
 	cmd.Stdout = out
-	err := cmd.Run()
-	return out.data, err
+	err = cmd.Run()
+	return out.data, errors.Join(err, cleanup())
 }
 
 type limitedOutput struct {
@@ -546,14 +557,20 @@ func inspectCodex(ctx context.Context, p Profile, result *ProviderSetting) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	args, _ := commandArgs("codex")
-	child, err := startChild(p, args, os.TempDir())
+	lease, err := nativeScratch(ctx, "native-inspection", 1<<20, 16)
+	if err != nil {
+		result.Detail = "Native inspection file capability is unavailable."
+		return
+	}
+	defer lease.Close()
+	child, err := startChild(ctx, p, args, lease.Path())
 	if err != nil {
 		result.Detail = "Codex metadata inspection could not start."
 		return
 	}
 	peer := newPeer(child.stdin, child.stdout, false, func(string, map[string]any) {}, func(context.Context, string, map[string]any) (any, error) { return nil, ErrUnavailable })
 	go func() { <-peer.done; _ = child.Wait() }()
-	defer func() { _ = peer.Close(); child.Stop() }()
+	defer func() { _ = peer.Close(); child.Stop(); <-child.done }()
 	if _, err = peer.Call(ctx, "initialize", map[string]any{"clientInfo": map[string]any{"name": "xgc-agent-runtime", "version": "0.1.0"}, "capabilities": map[string]any{"experimentalApi": false}}); err != nil {
 		result.Detail = "Codex metadata handshake failed."
 		return

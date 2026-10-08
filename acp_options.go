@@ -5,7 +5,6 @@ package agentruntime
 import (
 	"context"
 	"errors"
-	"os"
 	"strings"
 )
 
@@ -151,20 +150,21 @@ func parseACPInventory(result *ProviderSetting, setup map[string]any) {
 	}
 }
 func inspectACP(ctx context.Context, p Profile, result *ProviderSetting) {
-	cwd, err := os.MkdirTemp("", "xgc-native-capabilities-*")
+	lease, err := nativeScratch(ctx, "native-capabilities", 1<<20, 16)
 	if err != nil {
 		return
 	}
-	defer os.RemoveAll(cwd)
+	defer lease.Close()
+	cwd := lease.Path()
 	args, _ := commandArgs(p.Provider)
-	child, err := startChild(p, args, cwd)
+	child, err := startChild(ctx, p, args, cwd)
 	if err != nil {
 		result.Detail = "ACP capability inspection could not start."
 		return
 	}
 	peer := newPeer(child.stdin, child.stdout, true, func(string, map[string]any) {}, func(context.Context, string, map[string]any) (any, error) { return nil, ErrUnavailable })
 	go func() { <-peer.done; _ = child.Wait() }()
-	defer func() { _ = peer.Close(); child.Stop() }()
+	defer func() { _ = peer.Close(); child.Stop(); <-child.done }()
 	capabilities := map[string]any{"fs": map[string]any{"readTextFile": false, "writeTextFile": false}, "terminal": false}
 	if p.Provider == "cursor" {
 		capabilities["_meta"] = map[string]any{"parameterizedModelPicker": true}

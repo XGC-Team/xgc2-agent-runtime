@@ -47,7 +47,7 @@ func (d *claudeDriver) Prompt(ctx context.Context, turn, prompt string) error {
 	if native != "" {
 		args = append(args, "--resume="+native)
 	}
-	c, err := startChild(d.profile, args, cwd)
+	c, err := startChild(ctx, d.profile, args, cwd)
 	if err != nil {
 		return err
 	}

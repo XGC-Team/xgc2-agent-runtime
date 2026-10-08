@@ -82,7 +82,7 @@ func (d *rpcDriver) Open(ctx context.Context, cwd, nativeID string) error {
 	if err != nil {
 		return err
 	}
-	c, err := startChild(d.profile, args, cwd, environment...)
+	c, err := startChild(ctx, d.profile, args, cwd, environment...)
 	if err != nil {
 		return err
 	}
@@ -318,6 +318,7 @@ func (d *rpcDriver) Close() error {
 	}
 	if process != nil {
 		process.Stop()
+		<-process.done
 	}
 	return nil
 }

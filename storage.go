@@ -131,7 +131,7 @@ func (s *Store) commit(ctx context.Context, token api.Token, mutations []api.Mut
 		return errors.New("agent-runtime: invalid durable storage receipt")
 	}
 	for i, record := range receipt.Versions {
-		if record.Key != mutations[i].Key || record.Version != receipt.Token.Revision || record.Deleted != mutations[i].Delete || record.Missing {
+		if record.Collection != mutations[i].Collection || record.Key != mutations[i].Key || record.Version != receipt.Token.Revision || record.Deleted != mutations[i].Delete || record.Missing {
 			return errors.New("agent-runtime: incomplete durable storage receipt")
 		}
 	}

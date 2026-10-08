@@ -164,3 +164,16 @@ func TestStorageQuotaFailureDoesNotPublishStateOrPrompt(t *testing.T) {
 		t.Fatalf("failed write published prompt: %v %v", found, err)
 	}
 }
+
+func TestStorageReceiptMustBindEveryCollection(t *testing.T) {
+	s := testSession(t, "s_collection_receipt")
+	base := s.store.Client
+	s.store.Client = interceptStorage{StorageClient: base, batch: func(ctx context.Context, r api.BatchRequest) (api.Receipt, error) {
+		out, err := base.Batch(ctx, r)
+		out.Versions[0].Collection = "events"
+		return out, err
+	}}
+	if err := s.appendLocked(Event{Kind: "notice", Text: "wrong collection receipt"}); err == nil || s.info.LastSeq != 0 {
+		t.Fatalf("cross-collection receipt published state: %v", err)
+	}
+}

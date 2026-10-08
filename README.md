@@ -23,11 +23,23 @@ prepare := func(ctx context.Context, scope nativeagent.Create, sessionID string,
     return productPrepare(ctx, scope, sessionID, fresh)
 }
 broker, err := nativeagent.Open(mux, nativeagent.OpenOptions{
-    Storage: conversations, Settings: settings, Prepare: prepare,
+    Storage: conversations, Settings: settings, NativeFiles: hostNativeFiles, Prepare: prepare,
     BasePath: "/api/agent-runtime",
 })
-// Handle err. Close broker before closing its storage transport.
+// Handle err. Close broker before closing its storage transport and file roots.
 ```
+
+`hostNativeFiles` comes from `NewNativeFiles` with explicitly opened host grants;
+see [native file capabilities](docs/native-files.md). The storage owner initializes
+the namespace from `storage-manifest.json` (`DeploymentManifest`) and supplies
+the exact database/schema/scope identity and instance-bound ServiceRef. The
+consumer never initializes a database or imports old settings/journals.
+
+Broker startup reads saved conversations without writing recovery events. It
+projects sessions without a live worker as disconnected and pending queues as
+paused. Existing history and unknown prior outcomes remain unchanged; explicit
+resume and queue commands must persist before dispatch. A full saved conversation
+can still be opened for reading without blocking the other conversations.
 
 `Create` has `ProfileID`, `Context ContextRef{Kind, ID}`,
 `Workspace WorkspaceRef{ID, Revision}`, and `AgentAccessConfirmed`.

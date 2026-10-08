@@ -116,17 +116,14 @@ func NewBroker(store *Store, profiles []Profile, prepare Prepare, factory Factor
 		}
 		b.sessions[s.info.ID] = s
 		if len(s.queue.Items) > 0 {
-			s.pauseQueueLocked()
-			if s.storageErr != nil {
-				cancel()
-				return nil, s.storageErr
-			}
+			// Startup restores the current host projection without requiring more
+			// durable capacity. The next explicit queue command records its change.
+			s.queue.Paused = true
 		}
 		if s.info.State != "closed" && s.info.State != "disconnected" {
-			if err := s.appendLocked(Event{Kind: "session.state", Status: "disconnected", Text: "Host restarted. Prior turn outcome may be unknown; prompts will not be resent."}); err != nil {
-				cancel()
-				return nil, err
-			}
+			// No worker exists in this host until explicit reconnect. Preserve the
+			// recorded outcome and history; a full session cannot block all history.
+			s.info.State = "disconnected"
 		}
 	}
 	return b, nil

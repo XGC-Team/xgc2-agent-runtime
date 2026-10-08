@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -169,7 +168,7 @@ func scope(profile string) Create {
 func testBroker(t *testing.T, provider string) (*Broker, Session) {
 	t.Helper()
 	root := t.TempDir()
-	b, err := NewBroker(filepath.Join(root, "journal"), []Profile{testProfile(t, provider)}, func(ctx context.Context, c Create, id string, fresh bool) (string, error) { return root, ctx.Err() }, nil)
+	b, err := NewBroker(testStorage(t), []Profile{testProfile(t, provider)}, func(ctx context.Context, c Create, id string, fresh bool) (string, error) { return root, ctx.Err() }, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +355,7 @@ func TestJournalRestartReplaysWithoutPromptResend(t *testing.T) {
 	waitState(t, b, s.ID, "ready")
 	events, _, _ := b.Replay(s.ID, 0)
 	cursor := events[len(events)-1].Seq
-	root, profiles, prepare := b.root, []Profile{testProfile(t, "claude")}, b.prepare
+	root, profiles, prepare := b.store, []Profile{testProfile(t, "claude")}, b.prepare
 	b.Close()
 	recovered, err := NewBroker(root, profiles, prepare, nil)
 	if err != nil {
@@ -407,10 +406,7 @@ func TestConfigAndEnvironmentNeverAcceptCredentials(t *testing.T) {
 	if checkExecutable(p) == nil {
 		t.Fatal("digest drift accepted")
 	}
-	root := t.TempDir()
-	path := filepath.Join(root, "config.json")
-	_ = os.WriteFile(path, []byte(`{"schemaVersion":"`+Schema+`","profiles":[],"apiKey":"secret"}`), 0600)
-	if _, err := LoadConfig(path); err == nil {
+	if _, err := decodeConfigBytes([]byte(`{"schemaVersion":"` + Schema + `","profiles":[],"apiKey":"secret"}`)); err == nil {
 		t.Fatal("unknown credential configuration accepted")
 	}
 }
@@ -518,15 +514,13 @@ func TestLoopbackOriginBodyAndEventCursorGuards(t *testing.T) {
 		t.Fatal("invalid cursor")
 	}
 }
-func TestOversizedAndTornJournalFailClosed(t *testing.T) {
-	root := t.TempDir()
-	path := filepath.Join(root, "s_x.jsonl")
-	info := Session{SchemaVersion: Schema, ID: "s_x", Scope: scope("claude"), Provider: "claude", State: "ready"}
-	data, _ := json.Marshal(info)
-	_ = os.WriteFile(path, data, 0600)
-	if b, err := NewBroker(root, nil, func(context.Context, Create, string, bool) (string, error) { return root, nil }, nil); err == nil {
+func TestMissingStorageBindingFailsClosed(t *testing.T) {
+	if b, err := NewBroker(nil, nil, func(context.Context, Create, string, bool) (string, error) { return t.TempDir(), nil }, nil); err == nil {
 		b.Close()
-		t.Fatal("torn journal accepted")
+		t.Fatal("missing storage accepted")
+	}
+	if _, err := decodeConfigBytes([]byte(`{"schemaVersion":"xgc.native-agent/v1","profiles":[]}`)); err == nil {
+		t.Fatal("retired schema accepted")
 	}
 }
 func TestSSEDisconnectDoesNotCancelWorker(t *testing.T) {
@@ -583,9 +577,8 @@ func TestUpstreamResolvedRequestExpiresWithoutLateReply(t *testing.T) {
 }
 
 func TestShutdownCancelsPendingWorkspacePreparation(t *testing.T) {
-	root := t.TempDir()
 	preparing := make(chan struct{})
-	b, err := NewBroker(filepath.Join(root, "journal"), []Profile{testProfile(t, "codex")}, func(ctx context.Context, c Create, id string, fresh bool) (string, error) {
+	b, err := NewBroker(testStorage(t), []Profile{testProfile(t, "codex")}, func(ctx context.Context, c Create, id string, fresh bool) (string, error) {
 		close(preparing)
 		<-ctx.Done()
 		return "", ctx.Err()

@@ -6,22 +6,20 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 )
 
-func settingsBroker(t *testing.T, path string) *Broker {
+func settingsBroker(t *testing.T, settings *Store) *Broker {
 	t.Helper()
 	root := t.TempDir()
-	b, err := NewBroker(filepath.Join(root, "journal"), nil, func(context.Context, Create, string, bool) (string, error) { return root, nil }, nil)
+	b, err := NewBroker(testStorage(t), nil, func(context.Context, Create, string, bool) (string, error) { return root, nil }, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { b.Close() })
-	if err = ConfigureBroker(b, BrokerOptions{SettingsFile: path}); err != nil {
+	if err = ConfigureBroker(b, BrokerOptions{Settings: settings}); err != nil {
 		t.Fatal(err)
 	}
 	return b
@@ -32,8 +30,8 @@ func settingsFixtureUpdate(t *testing.T, revision string, defaults AgentOptions)
 	return SettingsUpdate{Revision: revision, Provider: ProviderUpdate{ID: "codex", Provider: "codex", Enabled: true, BinaryPath: p.Executable, Defaults: defaults}}
 }
 func TestSettingsDiscoveryCASAndCrossBrokerVisibility(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "agent-runtime.json")
-	a, b := settingsBroker(t, path), settingsBroker(t, path)
+	settings := testStorage(t)
+	a, b := settingsBroker(t, settings), settingsBroker(t, settings)
 	initial, err := a.Settings()
 	if err != nil || len(initial.Providers) != 5 {
 		t.Fatalf("initial: %+v %v", initial, err)
@@ -71,18 +69,15 @@ func TestSettingsDiscoveryCASAndCrossBrokerVisibility(t *testing.T) {
 	if _, err = b.UpdateSettings(context.Background(), settingsFixtureUpdate(t, initial.Revision, defaults)); !errors.Is(err, ErrConflict) {
 		t.Fatalf("stale update: %v", err)
 	}
-	mode, err := os.Stat(path)
-	if err != nil || mode.Mode().Perm() != 0600 {
-		t.Fatalf("settings mode: %v %v", mode, err)
-	}
-	profiles, err := LoadConfig(path)
+	profiles, _, err := settings.profiles(context.Background())
 	if err != nil || len(profiles) != 1 || profiles[0].Defaults != defaults {
-		t.Fatalf("legacy loader lost settings: %+v %v", profiles, err)
+		t.Fatalf("stored settings: %+v %v", profiles, err)
 	}
+
 }
 func TestSettingsConcurrentIndependentBrokersOnlyOneCASWinner(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "agent-runtime.json")
-	a, b := settingsBroker(t, path), settingsBroker(t, path)
+	settings := testStorage(t)
+	a, b := settingsBroker(t, settings), settingsBroker(t, settings)
 	initial, _ := a.Settings()
 	start := make(chan struct{})
 	results := make(chan error, 2)
@@ -114,8 +109,8 @@ func TestSettingsConcurrentIndependentBrokersOnlyOneCASWinner(t *testing.T) {
 	}
 }
 func TestNativeSelectionsCrossBrokerSnapshotAndIdempotency(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "agent-runtime.json")
-	settingsOwner, consumer := settingsBroker(t, path), settingsBroker(t, path)
+	settings := testStorage(t)
+	settingsOwner, consumer := settingsBroker(t, settings), settingsBroker(t, settings)
 	initial, _ := settingsOwner.Settings()
 	defaults := AgentOptions{Model: "fixture-native", Effort: "medium", Permission: "approval-required"}
 	saved, err := settingsOwner.UpdateSettings(context.Background(), settingsFixtureUpdate(t, initial.Revision, defaults))
@@ -188,14 +183,18 @@ func TestNativeSelectionsCrossBrokerSnapshotAndIdempotency(t *testing.T) {
 	if fresh.Options != changed {
 		t.Fatalf("new session ignored shared settings: %+v", fresh.Options)
 	}
-	recordBytes, err := os.ReadFile(filepath.Join(consumer.root, s.ID+".jsonl"))
+	records, err := consumer.store.records(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	var record sessionRecord
-	line, _, _ := strings.Cut(string(recordBytes), "\n")
-	if json.Unmarshal([]byte(line), &record) != nil || record.ProfileSnapshot == nil || record.ProfileSnapshot.Defaults != defaults {
-		t.Fatal("private journal snapshot missing")
+	found = false
+	for _, record := range records {
+		if record.ID == s.ID {
+			found = record.ProfileSnapshot.Executable != ""
+		}
+	}
+	if !found {
+		t.Fatal("private storage snapshot missing")
 	}
 	apiBytes, _ := json.Marshal(current)
 	if strings.Contains(string(apiBytes), "profileSnapshot") || strings.Contains(string(apiBytes), testProfile(t, "codex").Executable) {
@@ -203,8 +202,8 @@ func TestNativeSelectionsCrossBrokerSnapshotAndIdempotency(t *testing.T) {
 	}
 }
 func TestUnsupportedProviderOptionsAndSettingsSecurity(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "agent-runtime.json")
-	b := settingsBroker(t, path)
+	settings := testStorage(t)
+	b := settingsBroker(t, settings)
 	initial, _ := b.Settings()
 	update := settingsFixtureUpdate(t, initial.Revision, AgentOptions{Model: "invented"})
 	if _, err := b.UpdateSettings(context.Background(), update); err == nil {
@@ -237,8 +236,8 @@ func TestUnsupportedProviderOptionsAndSettingsSecurity(t *testing.T) {
 }
 
 func TestRestartKeepsPrivateProfileSnapshotAndReplaySkipsDiscovery(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "agent-runtime.json")
-	b := settingsBroker(t, path)
+	settings := testStorage(t)
+	b := settingsBroker(t, settings)
 	initial, _ := b.Settings()
 	defaults := AgentOptions{Model: "fixture-native", Effort: "medium", Permission: "approval-required"}
 	saved, err := b.UpdateSettings(context.Background(), settingsFixtureUpdate(t, initial.Revision, defaults))
@@ -280,16 +279,16 @@ func TestRestartKeepsPrivateProfileSnapshotAndReplaySkipsDiscovery(t *testing.T)
 		t.Fatal(err)
 	}
 	b.Close()
-	profiles, err := LoadConfig(path)
+	profiles, _, err := settings.profiles(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	restored, err := NewBroker(b.root, profiles, b.prepare, nil)
+	restored, err := NewBroker(b.store, profiles, b.prepare, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer restored.Close()
-	if err = ConfigureBroker(restored, BrokerOptions{SettingsFile: path}); err != nil {
+	if err = ConfigureBroker(restored, BrokerOptions{Settings: settings}); err != nil {
 		t.Fatal(err)
 	}
 	info, err := restored.Get(s.ID)

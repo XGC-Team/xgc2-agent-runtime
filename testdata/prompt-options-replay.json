@@ -34,7 +34,8 @@
       "providerOptions": {
         "effort": "high",
         "model": "gpt-5.3-codex-spark"
-      }
+      },
+      "type": "userMessage"
     }
   },
   {

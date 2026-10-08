@@ -58,7 +58,7 @@ func conversationBroker(t *testing.T, firstOpenFails bool) (*Broker, Profile, Fa
 	factory := func(_ Profile, sink Sink, ask Ask) (Driver, error) {
 		return &conversationDriver{sink: sink, ask: ask, fail: firstOpenFails && builds.Add(1) == 1}, nil
 	}
-	b, err := NewBroker(filepath.Join(root, "journal"), []Profile{profile}, func(context.Context, Create, string, bool) (string, error) { return root, nil }, factory)
+	b, err := NewBroker(testStorage(t), []Profile{profile}, func(context.Context, Create, string, bool) (string, error) { return root, nil }, factory)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,11 +91,11 @@ func TestConversationMetadataArchiveAndResumeKeepIdentity(t *testing.T) {
 	if _, err = b.UpdateMetadata(s.ID, MetadataUpdate{ExpectedRevision: 1, Title: &title}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("stale metadata=%v", err)
 	}
-	if b.sessions[s.ID].events != nil || b.sessions[s.ID].file != nil {
+	if len(b.sessions[s.ID].turns) > 0 || len(b.sessions[s.ID].inputs) > 0 {
 		t.Fatal("archived transcript retained live memory or writer")
 	}
 	b.Close()
-	restored, err := NewBroker(b.root, []Profile{profile}, b.prepare, factory)
+	restored, err := NewBroker(b.store, []Profile{profile}, b.prepare, factory)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,13 +190,13 @@ func TestClosedHistoryDoesNotConsumeWorkerCapacityAndPagesStayScoped(t *testing.
 	}
 	waitState(t, b, other.ID, "ready")
 	b.Close()
-	restored, err := NewBroker(b.root, []Profile{profile}, b.prepare, factory)
+	restored, err := NewBroker(b.store, []Profile{profile}, b.prepare, factory)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer restored.Close()
 	for _, s := range restored.sessions {
-		if s.events != nil || s.file != nil {
+		if len(s.turns) > 0 || len(s.inputs) > 0 {
 			t.Fatal("startup retained historical content or descriptors")
 		}
 	}
@@ -286,7 +286,7 @@ func TestDecisionAuditAndGlobalAttentionRemainSeparateFromFreeText(t *testing.T)
 		waitState(t, b, s.ID, "ready")
 	}
 	b.Close()
-	restored, err := NewBroker(b.root, []Profile{profile}, b.prepare, factory)
+	restored, err := NewBroker(b.store, []Profile{profile}, b.prepare, factory)
 	if err != nil {
 		t.Fatal(err)
 	}

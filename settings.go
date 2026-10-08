@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -65,49 +64,27 @@ type SettingsUpdate struct {
 	Revision string         `json:"revision"`
 	Provider ProviderUpdate `json:"provider"`
 }
-type BrokerOptions struct{ SettingsFile string }
+type BrokerOptions struct{ Settings *Store }
 type settingsState struct {
-	file      string
-	initial   []Profile
+	store     *Store
 	mu        sync.Mutex
 	inventory map[string]ProviderSetting
 }
 
-// ConfigureBroker enables one host-owned settings file shared by product brokers.
-// Existing NewBroker callers remain valid and retain immutable supplied profiles.
+// ConfigureBroker binds shared Provider settings to an explicitly granted scope.
 func ConfigureBroker(b *Broker, options BrokerOptions) error {
-	if !filepath.IsAbs(options.SettingsFile) {
-		return errors.New("settings require an absolute shared configuration path")
+	if options.Settings == nil {
+		return errors.New("settings storage is required")
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.settings != nil {
 		return errors.New("settings are already configured")
 	}
-	initial := []Profile{}
-	for _, p := range b.profiles {
-		initial = append(initial, p)
-	}
-	b.settings = &settingsState{file: options.SettingsFile, initial: initial, inventory: map[string]ProviderSetting{}}
+	b.settings = &settingsState{store: options.Settings, inventory: map[string]ProviderSetting{}}
 	return nil
 }
 
-// DefaultSettingsPath is shared by every local product consumer.
-func DefaultSettingsPath() (string, error) {
-	root, err := os.UserConfigDir()
-	if err != nil {
-		return "", err
-	}
-	dir := filepath.Join(root, "xgc")
-	path := filepath.Join(dir, "agent-runtime.json")
-	previous := filepath.Join(dir, "native-agents.json")
-	if _, err = os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		if _, err = os.Stat(previous); err == nil {
-			_ = os.Rename(previous, path)
-		}
-	}
-	return path, nil
-}
 func lookupProvider(provider, command string) (string, error) {
 	if command != "" {
 		return exec.LookPath(command)
@@ -149,20 +126,7 @@ func emptySetting(p Profile) ProviderSetting {
 	return ProviderSetting{ID: p.ID, Provider: p.Provider, Enabled: !p.Disabled, BinaryPath: path, Available: available, Version: p.ReviewedVersion, Login: LoginStatus{"unknown", "Login has not been checked."}, Detail: detail, Defaults: p.Defaults, Models: []Model{}, Permissions: []Permission{}}
 }
 func (s *settingsState) read() ([]Profile, string, error) {
-	info, err := os.Lstat(s.file)
-	if os.IsNotExist(err) {
-		data, _ := json.Marshal(Config{SchemaVersion: Schema, Profiles: s.initial})
-		return append([]Profile{}, s.initial...), hash(string(data)), nil
-	}
-	if err != nil || !info.Mode().IsRegular() || info.Size() > 64<<10 {
-		return nil, "", errors.New("invalid settings file")
-	}
-	data, err := os.ReadFile(s.file)
-	if err != nil {
-		return nil, "", err
-	}
-	profiles, err := decodeConfig(strings.NewReader(string(data)))
-	return profiles, hash(string(data)), err
+	return s.store.profiles(context.Background())
 }
 func (b *Broker) reloadSettingsProfiles() error {
 	if b.settings == nil {
@@ -368,22 +332,6 @@ func (b *Broker) UpdateSettings(ctx context.Context, input SettingsUpdate) (Sett
 	if err = validateOptions(input.Provider.Defaults, inventory); err != nil && preserved == nil {
 		return Settings{}, err
 	}
-	if err = os.MkdirAll(filepath.Dir(s.file), 0700); err != nil {
-		return Settings{}, err
-	}
-	lockPath := s.file + ".lock"
-	if info, e := os.Lstat(lockPath); e == nil && !info.Mode().IsRegular() {
-		return Settings{}, errors.New("invalid settings lock")
-	}
-	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
-	if err != nil {
-		return Settings{}, err
-	}
-	defer lock.Close()
-	if err = lockSettings(ctx, lock); err != nil {
-		return Settings{}, err
-	}
-	defer unlockSettings(lock)
 	s.mu.Lock()
 	profiles, revision, err := s.read()
 	if err != nil {
@@ -412,35 +360,7 @@ func (b *Broker) UpdateSettings(ctx context.Context, input SettingsUpdate) (Sett
 		}
 		profiles = append(profiles, profile)
 	}
-	data, _ := json.MarshalIndent(Config{SchemaVersion: Schema, Profiles: profiles}, "", "  ")
-	data = append(data, '\n')
-	temp, err := os.CreateTemp(filepath.Dir(s.file), ".native-settings-*")
-	if err == nil {
-		name := temp.Name()
-		defer os.Remove(name)
-		err = temp.Chmod(0600)
-		if err == nil {
-			_, err = temp.Write(data)
-		}
-		if err == nil {
-			err = temp.Sync()
-		}
-		closeErr := temp.Close()
-		if err == nil {
-			err = closeErr
-		}
-		if err == nil {
-			err = os.Rename(name, s.file)
-			if err == nil {
-				if dir, e := os.Open(filepath.Dir(s.file)); e == nil {
-					err = dir.Sync()
-					_ = dir.Close()
-				} else {
-					err = e
-				}
-			}
-		}
-	}
+	err = s.store.saveProfiles(ctx, input.Revision, profiles)
 	if err == nil {
 		s.inventory[profile.Executable+":"+profile.SHA256] = inventory
 	}

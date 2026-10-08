@@ -14,20 +14,19 @@ Its source, license, theme contract and capability boundaries are documented in
 ## Product composition
 
 ```go
-profiles, err := nativeagent.LoadConfig(reviewedProfilePath)
-// Handle err. Empty path provides no profiles and launches nothing.
+// The process owner creates an authenticated storage/client and owns its
+// XRPC transport lifetime. Bindings name the explicit initialized database.
+conversations, err := nativeagent.NewStore(conversationBinding)
+settings, err := nativeagent.NewStore(sharedSettingsBinding)
+// Handle errors. Bindings use agent-runtime / agent-runtime.v1 and granted scopes.
 prepare := func(ctx context.Context, scope nativeagent.Create, sessionID string, fresh bool) (string, error) {
-    // Verify scope.Context, resolve scope.Workspace through product authority,
-    // and return its reviewed private working directory. On resume validate
-    // the same retained workspace, never substitute a new mutable source.
     return productPrepare(ctx, scope, sessionID, fresh)
 }
-broker, err := nativeagent.NewBroker(privateJournalRoot, profiles, prepare, nil)
-// Handle err and close broker at product shutdown.
-// Optional shared local provider settings (one file for every local product).
-err = nativeagent.ConfigureBroker(broker, nativeagent.BrokerOptions{SettingsFile: reviewedProfilePath})
-// Handle err. Omit ConfigureBroker for legacy immutable profiles.
-err = nativeagent.RegisterRoutes(mux, broker, "/api/agent-runtime")
+broker, err := nativeagent.Open(mux, nativeagent.OpenOptions{
+    Storage: conversations, Settings: settings, Prepare: prepare,
+    BasePath: "/api/agent-runtime",
+})
+// Handle err. Close broker before closing its storage transport.
 ```
 
 `Create` has `ProfileID`, `Context ContextRef{Kind, ID}`,
@@ -80,20 +79,19 @@ events. It does not inspect vendor authentication or transcript files.
 
 ## Shared provider settings and current-turn options
 
-`DefaultSettingsPath()` resolves the shared local `xgc/agent-runtime.json` under
-`os.UserConfigDir()`. A missing file is allowed. `ConfigureBroker` initially
-lists the five native clients disabled; installing a CLI never enables it.
+`ConfigureBroker` binds one explicit shared storage scope. A missing providers
+record lists the five native clients disabled; installing a CLI never enables it.
 Settings contain enabled state, a reviewed binary path and default model,
 effort and permission selections. Credentials remain with the native clients;
 login status is reported as unknown until a public native status interface
 confirms it. The settings API accepts no tokens, environment overrides or
 arbitrary command arguments.
 
-`GET /settings` rereads the shared file and cached metadata without spawning a
+`GET /settings` reads the shared storage record and cached metadata without spawning a
 CLI. `POST /settings/refresh {id}` probes only that provider. `POST /settings`
-accepts `{revision, provider:{id,provider,enabled,binaryPath,defaults}}`; an OS
-file lock, disk re-read and atomic private-file replacement enforce revision
-CAS across independent product processes. A stale revision returns 409.
+accepts `{revision, provider:{id,provider,enabled,binaryPath,defaults}}`; a guarded
+snapshot and atomic storage batch enforce revision CAS across independent
+product processes. A stale revision returns 409.
 Other brokers observe committed settings on their next read or creation.
 Probe results are process-local caches, not a second settings store.
 
@@ -109,10 +107,8 @@ model, reasoning level or permission fallback is invented.
 Prompt receipts with selections use the typed details contract
 `{type:"userMessage",providerOptions:{model?,effort?,permission?}}` on the submitted
 `user` snapshot. The same option values restore the durable idempotency check.
-The Web decoder normalizes only the previously persisted, untagged
-`{providerOptions:{...}}` shape on that exact receipt; other unknown detail types,
-roles or fields remain errors. Existing journals are replayed without rewriting
-or resubmitting their prompts. The shared sanitized nine-event replay fixture
+The Web decoder requires the typed receipt and rejects unknown detail types,
+roles and fields. Saved new-model events replay without resubmitting prompts. The shared sanitized nine-event replay fixture
 tests the Go receipt and Web decoder together; native/tool details and prompt
 receipt metadata must evolve under the same protocol contract.
 
@@ -174,7 +170,7 @@ system sandbox is implied by these extraction tests.
 
 `POST /sessions/{id}/queue` accepts `enqueue`, `edit`, `remove`, `reorder`,
 `pause`, and `resume`. Enqueue uses its stable Idempotency-Key; other mutations
-require the current `expectedRevision`. The journal's `prompt.queue` event
+require the current `expectedRevision`. The committed `prompt.queue` event
 projects the ordered pending messages and pause state. A queued message captures
 its model, effort, and permission selection at admission. Normal completion
 advances one message; failed, interrupted, or unknown completion pauses the
@@ -185,3 +181,22 @@ Queueing is separate from provider steering and from answering native approval
 or question requests. Hosts opt into `AgentConversation.queueEnabled` and use
 `AgentPromptQueue` for presentation callbacks. Ordinary direct prompt clients
 retain their existing ready-only contract.
+
+## Persistence
+
+The deployment input is `storage-manifest.json`. The host supplies explicit
+storage scopes and database/schema identities. Conversation metadata, ordered
+events and submitted prompt identities commit in one CAS batch. Provider settings
+use a separate shared scope and revision CAS. Storage owns database files and
+FULL durability; the broker retains no transcript files or event cache.
+
+Startup reads saved metadata and queue references. It marks interrupted sessions
+as disconnected and pauses retained queued prompts; resume is explicit. A lost
+write reply is checked through its request receipt and never automatically
+resubmitted. Missing storage or identity mismatches fail startup.
+
+Limits are 128 active workers, 2048 retained conversations, 100000 events and
+32 MiB of event data per conversation. The manifest also limits aggregate records,
+bytes and receipts. Reaching quota retains user history and reports failure;
+saved transcripts are not automatically deleted. Storage backup/restore covers
+new-model records. There is no old JSON/JSONL/schema loader or importer.

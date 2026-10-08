@@ -12,7 +12,7 @@ import (
 )
 
 // Session.ID is the durable conversation identity. Metadata changes and worker
-// restarts append to its existing journal; they never create another transcript.
+// restarts append to its existing conversation; they never create another transcript.
 type SessionMetadata struct {
 	Title            string `json:"title"`
 	Archived         bool   `json:"archived"`
@@ -67,7 +67,7 @@ func (b *Broker) UpdateMetadata(id string, update MetadataUpdate) (Session, erro
 		finish, err = s.retireRuntimeLocked()
 	}
 	info := s.info
-	s.releaseJournalLocked()
+	s.releaseHistoryLocked()
 	s.mu.Unlock()
 	finish()
 	return info, err
@@ -80,7 +80,7 @@ func (s *liveSession) retireRuntimeLocked() (func(), error) {
 		return func() {}, ErrConflict
 	}
 	if s.info.State == "closed" {
-		s.releaseJournalLocked()
+		s.releaseHistoryLocked()
 		return func() {}, nil
 	}
 	s.runtimeClosing = true
@@ -104,14 +104,14 @@ func (s *liveSession) retireRuntimeLocked() (func(), error) {
 		}
 		s.mu.Lock()
 		s.runtimeClosing = false
-		s.releaseJournalLocked()
+		s.releaseHistoryLocked()
 		s.mu.Unlock()
 	}, err
 }
 
 // Closed and disconnected history keeps only metadata in memory. Replay and
-// idempotency checks read bounded records on demand, without a writer per log.
-func (s *liveSession) releaseJournalLocked() {
+// idempotency checks read bounded records on demand, without retaining transcript content.
+func (s *liveSession) releaseHistoryLocked() {
 	if s.current != "" || s.opening != nil || (s.info.State != "closed" && s.info.State != "disconnected") {
 		return
 	}
@@ -120,11 +120,6 @@ func (s *liveSession) releaseJournalLocked() {
 			return
 		}
 	}
-	if s.file != nil {
-		_ = s.file.Close()
-		s.file = nil
-	}
-	s.events = nil
 	s.turns = map[string]string{}
 	s.inputs = map[string]*pendingInput{}
 }

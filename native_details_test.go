@@ -3,7 +3,6 @@ package agentruntime
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -90,17 +89,16 @@ func TestCodexApprovalKeepsSourceAndQuestionSemanticsWithoutWideningAuthority(t 
 	}
 }
 func TestNativeEventTimeIsPersistedReceiptTime(t *testing.T) {
-	file, err := os.CreateTemp(t.TempDir(), "event-*.jsonl")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer file.Close()
-	session := newSession(Session{ID: "s_time", Provider: "codex"}, file)
+	session := testSession(t, "s_time")
 	start := time.Now().UTC()
 	if err := session.appendLocked(Event{Kind: "notice", Text: "fixture", CreatedAt: "2000-01-01T00:00:00Z"}); err != nil {
 		t.Fatal(err)
 	}
-	receipt, err := time.Parse(time.RFC3339Nano, session.events[0].CreatedAt)
+	events, err := session.readEventsLocked(0, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := time.Parse(time.RFC3339Nano, events[0].CreatedAt)
 	if err != nil || receipt.Before(start) || receipt.After(time.Now().UTC()) {
 		t.Fatalf("receipt=%v err=%v", receipt, err)
 	}

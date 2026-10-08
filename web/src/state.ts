@@ -267,12 +267,7 @@ export function decodeEvent(value: unknown, sessionId: string, expectedProvider:
     result.decision = nativeDecision(e.decision)
   }
   if (e.details !== undefined) {
-    const details = record(e.details)
-    // The initial options producer persisted this exact untagged user receipt.
-    // Normalize only that journal shape; unknown native structures stay invalid.
-    const legacyPrompt = e.kind === 'item.snapshot' && e.role === 'user' && e.itemId === 'user' && e.status === 'submitted'
-      && Object.keys(details).length === 1 && Object.keys(details)[0] === 'providerOptions'
-    result.details = nativeDetails(legacyPrompt ? { type: 'userMessage', ...details } : details)
+    result.details = nativeDetails(e.details)
   }
   if (e.role !== undefined) { if (!roles.includes(e.role as Role)) throw new Error('未知消息角色。'); result.role = e.role as Role }
   if (result.kind.startsWith('item.') && (!result.turnId || !result.itemId || !result.role)) throw new Error('消息缺少轮次、条目或角色。')

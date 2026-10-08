@@ -39,15 +39,11 @@ describe('persisted native prompt options replay', () => {
     for (const event of fixture) expect(applyEvent(state, event)).toBe(state)
   })
 
-  it('uses one decoded contract for old and typed receipts, preserving every selected option', () => {
-    const legacy = applyEvent(beforeReceipt(), receipt)
-    const typed = applyEvent(beforeReceipt(), typedReceipt())
-    expect(typed).toEqual(legacy)
-    expect(applyEvent(legacy, typedReceipt())).toBe(legacy)
-    expect(applyEvent(typed, receipt)).toBe(typed)
+  it('preserves every selected option and rejects retired untagged receipts', () => {
     const selected = { ...providerOptions, permission: 'approval-required' }
     expect(decodeEvent(typedReceipt({ details: { type: 'userMessage', providerOptions: selected } }), 's_prompt_replay', 'codex').details)
       .toEqual({ type: 'userMessage', providerOptions: selected })
+    expect(() => applyEvent(beforeReceipt(), { ...receipt, details: { providerOptions } })).toThrow()
   })
 
   it('detects changed selections on a repeated event sequence', () => {
@@ -84,7 +80,7 @@ describe('persisted native prompt options replay', () => {
     { name: 'patch', kind: 'item.patch' },
     { name: 'other item', itemId: 'another-user' },
     { name: 'unsubmitted', status: 'completed' },
-  ])('rejects prompt metadata on $name for both old and typed details', ({ name: _name, ...extra }) => {
+  ])('rejects prompt metadata on $name for current typed details', ({ name: _name, ...extra }) => {
     expect(() => applyEvent(beforeReceipt(), { ...receipt, ...extra })).toThrow()
     expect(() => applyEvent(beforeReceipt(), typedReceipt(extra))).toThrow()
   })

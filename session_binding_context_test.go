@@ -2,8 +2,7 @@ package agentruntime
 
 import (
 	"context"
-	"os"
-	"path/filepath"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -23,7 +22,7 @@ func (d *bindingValueDriver) BindSession(ctx context.Context, scope Create, id s
 	return d.scopedFixtureDriver.BindSession(ctx, scope, id)
 }
 func TestBrokerCarriesEphemeralBindingValuesWithoutRequestLifetimeOrJournal(t *testing.T) {
-	root := scopePrivateDirectory(t)
+	root := testStorage(t)
 	workspace := t.TempDir()
 	profile := scopeProfile(t)
 	bound := make(chan scopeReceipt, 4)
@@ -66,7 +65,8 @@ func TestBrokerCarriesEphemeralBindingValuesWithoutRequestLifetimeOrJournal(t *t
 	if err := broker.Close(); err != nil {
 		t.Fatal(err)
 	}
-	journal, err := os.ReadFile(filepath.Join(root, session.ID+".jsonl"))
+	events, _, err := broker.Replay(session.ID, 0)
+	journal, _ := json.Marshal(events)
 	if err != nil {
 		t.Fatal(err)
 	}

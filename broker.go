@@ -1,7 +1,6 @@
 package agentruntime
 
 import (
-	"bufio"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -9,9 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -19,7 +15,6 @@ import (
 	"unicode/utf8"
 )
 
-const MaxJournalBytes = 32 << 20
 const MaxSessions = 128
 const MaxEvents = 100000
 
@@ -33,31 +28,31 @@ type pendingInput struct {
 	cancel  context.CancelFunc
 }
 type liveSession struct {
-	mu             sync.Mutex
-	stopping       bool
-	opening        context.CancelFunc
-	info           Session
-	events         []Event
-	file           *os.File
-	path           string
-	runtimeClosing bool
-	bytes          int64
-	storageErr     error
-	changed        chan struct{}
-	driver         Driver
-	cwd            string
-	current        string
-	cancel         context.CancelFunc
-	ended          bool
-	lastTurnStatus string
-	queue          PromptQueue
-	inputs         map[string]*pendingInput
-	turns          map[string]string
-	profile        Profile
+	mu                  sync.Mutex
+	stopping            bool
+	opening             context.CancelFunc
+	info                Session
+	store               *Store
+	queueSeq            uint64
+	submittedQueueTurns []string
+	runtimeClosing      bool
+	bytes               int64
+	storageErr          error
+	changed             chan struct{}
+	driver              Driver
+	cwd                 string
+	current             string
+	cancel              context.CancelFunc
+	ended               bool
+	lastTurnStatus      string
+	queue               PromptQueue
+	inputs              map[string]*pendingInput
+	turns               map[string]string
+	profile             Profile
 }
 type Broker struct {
 	mu                sync.Mutex
-	root              string
+	store             *Store
 	profiles          map[string]Profile
 	sessions          map[string]*liveSession
 	prepare           Prepare
@@ -70,141 +65,78 @@ type Broker struct {
 	decisionEvaluator DecisionEvaluator
 }
 
-func NewBroker(root string, profiles []Profile, prepare Prepare, factory Factory) (*Broker, error) {
-	if prepare == nil {
-		return nil, errors.New("workspace preparation is required")
+func NewBroker(store *Store, profiles []Profile, prepare Prepare, factory Factory) (*Broker, error) {
+	if store == nil || prepare == nil {
+		return nil, errors.New("storage and workspace preparation are required")
 	}
 	if factory == nil {
 		factory = NewDriver
 	}
-	if err := os.MkdirAll(root, 0700); err != nil {
-		return nil, err
-	}
-	info, err := os.Lstat(root)
-	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0077 != 0 {
-		return nil, errors.New("agent runtime journal must be an owned private directory")
-	}
-	root, err = filepath.Abs(root)
-	if err != nil {
-		return nil, err
-	}
 	ctx, cancel := context.WithCancel(context.Background())
-	b := &Broker{ctx: ctx, cancel: cancel, root: root, profiles: map[string]Profile{}, sessions: map[string]*liveSession{}, prepare: prepare, factory: factory}
+	b := &Broker{ctx: ctx, cancel: cancel, store: store, profiles: map[string]Profile{}, sessions: map[string]*liveSession{}, prepare: prepare, factory: factory}
 	for _, p := range profiles {
 		if _, ok := b.profiles[p.ID]; ok {
+			cancel()
 			return nil, errors.New("duplicate provider profile")
 		}
 		if _, err := commandArgs(p.Provider); err != nil {
+			cancel()
 			return nil, err
 		}
 		b.profiles[p.ID] = p
 	}
-	entries, err := os.ReadDir(root)
+	records, err := store.records(context.Background())
 	if err != nil {
+		cancel()
 		return nil, err
 	}
-	for _, entry := range entries {
-		if !strings.HasSuffix(entry.Name(), ".jsonl") {
-			continue
+	for _, record := range records {
+		s := newSession(record.Session, store)
+		s.profile = record.ProfileSnapshot
+		s.bytes = record.Bytes
+		s.queueSeq = record.QueueSeq
+		s.submittedQueueTurns = record.SubmittedQueueTurns
+		s.lastTurnStatus = record.LastTurnStatus
+		if record.QueueSeq > 0 {
+			events, err := store.readEvents(record.ID, record.QueueSeq-1, record.QueueSeq)
+			if err != nil || events[0].Queue == nil {
+				cancel()
+				return nil, errors.Join(errors.New("persisted queue unavailable"), err)
+			}
+			s.queue = cloneQueue(*events[0].Queue)
+			for _, turn := range record.SubmittedQueueTurns {
+				s.applyQueueEventLocked(Event{Kind: "item.snapshot", Role: "user", Status: "submitted", TurnID: turn})
+			}
 		}
-		if err = b.load(filepath.Join(root, entry.Name())); err != nil {
-			b.Close()
-			return nil, err
+		b.sessions[s.info.ID] = s
+		if len(s.queue.Items) > 0 {
+			s.pauseQueueLocked()
+			if s.storageErr != nil {
+				cancel()
+				return nil, s.storageErr
+			}
+		}
+		if s.info.State != "closed" && s.info.State != "disconnected" {
+			if err := s.appendLocked(Event{Kind: "session.state", Status: "disconnected", Text: "Host restarted. Prior turn outcome may be unknown; prompts will not be resent."}); err != nil {
+				cancel()
+				return nil, err
+			}
 		}
 	}
 	return b, nil
 }
 
-// Each log starts with a metadata record and contains only our normalized events.
-// A torn trailing record is rejected, never silently truncated or treated as success.
-func (b *Broker) load(path string) error {
-	info, err := os.Lstat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 || info.Size() > MaxJournalBytes {
-		return errors.New("invalid session journal")
-	}
-	file, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND, 0600)
-	if err != nil {
-		return err
-	}
-	ok := false
-	defer func() {
-		if !ok {
-			file.Close()
-		}
-	}()
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 4096), MaxFrame)
-	if !scanner.Scan() {
-		return errors.New("journal metadata missing")
-	}
-	var record sessionRecord
-	if json.Unmarshal(scanner.Bytes(), &record) != nil || record.SchemaVersion != Schema || !safeID.MatchString(record.ID) || record.Scope.Validate() != nil || filepath.Base(path) != record.ID+".jsonl" {
-		return errors.New("invalid journal metadata")
-	}
-	infoRecord := record.Session
-	if _, err := commandArgs(infoRecord.Provider); err != nil {
-		return errors.New("invalid journal provider")
-	}
-	s := newSession(infoRecord, file)
-	// Historical journals are validated as a stream, not retained in memory or
-	// kept open. Only live conversations need an event cache.
-	s.events = nil
-	if record.ProfileSnapshot != nil {
-		s.profile = *record.ProfileSnapshot
-	} else {
-		s.profile = b.profiles[infoRecord.Scope.ProfileID]
-	}
-	s.bytes = info.Size()
-	for scanner.Scan() {
-		var e Event
-		if json.Unmarshal(scanner.Bytes(), &e) != nil || e.SchemaVersion != Schema || e.SessionID != infoRecord.ID || e.Provider != infoRecord.Provider || e.Seq != s.info.LastSeq+1 || s.info.LastSeq >= MaxEvents {
-			return errors.New("journal event identity or sequence mismatch")
-		}
-		s.info.LastSeq = e.Seq
-		if e.Kind == "session.identity" {
-			s.info.AgentSessionID = e.AgentSessionID
-		}
-		if e.Kind == "session.state" {
-			s.info.State = e.Status
-		}
-		s.applyMetadataLocked(e)
-	}
-	if scanner.Err() != nil {
-		return errors.New("journal could not be read")
-	}
-	// Scanner accepts a final line without LF. Our writer never does: such a tail
-	// is a crash boundary and cannot be safely appended to.
-	if info.Size() > 0 {
-		last := []byte{0}
-		if _, err = file.ReadAt(last, info.Size()-1); err != nil || last[0] != '\n' {
-			return errors.New("torn journal; retain for explicit recovery")
-		}
-	}
-	if len(s.queue.Items) > 0 {
-		s.pauseQueueLocked()
-	}
-	b.sessions[s.info.ID] = s
-	ok = true
-	if s.info.State != "closed" {
-		if err = s.appendLocked(Event{Kind: "session.state", Status: "disconnected", Text: "Host restarted. Prior turn outcome may be unknown; prompts will not be resent."}); err != nil {
-			return err
-		}
-	}
-	s.releaseJournalLocked()
-	return nil
-}
-
-type sessionRecord struct {
-	Session
-	ProfileSnapshot *Profile `json:"profileSnapshot,omitempty"`
-}
-
-func newSession(info Session, file *os.File) *liveSession {
+func newSession(info Session, store *Store) *liveSession {
 	if info.MetadataRevision == 0 {
 		info.MetadataRevision = 1
 	}
-	return &liveSession{info: info, file: file, path: file.Name(), events: []Event{}, changed: make(chan struct{}), inputs: map[string]*pendingInput{}, turns: map[string]string{}}
+	return &liveSession{info: info, store: store, changed: make(chan struct{}), inputs: map[string]*pendingInput{}, turns: map[string]string{}}
 }
+
+func (s *liveSession) record() sessionRecord {
+	return sessionRecord{Session: s.info, ProfileSnapshot: s.profile, Bytes: s.bytes, QueueSeq: s.queueSeq, SubmittedQueueTurns: append([]string{}, s.submittedQueueTurns...), LastTurnStatus: s.lastTurnStatus}
+}
+
 func (s *liveSession) appendLocked(e Event) error {
 	if s.storageErr != nil {
 		return s.storageErr
@@ -224,40 +156,51 @@ func (s *liveSession) appendLocked(e Event) error {
 	if err != nil {
 		return err
 	}
-	if len(data)+1 >= MaxFrame || s.bytes+int64(len(data)+1) > MaxJournalBytes || s.info.LastSeq >= MaxEvents {
-		err = errors.New("event journal capacity reached; retain and review this session")
+	if len(data) > 3<<20 || s.bytes+int64(len(data)) > MaxSessionBytes || s.info.LastSeq >= MaxEvents {
+		err = errors.New("event storage capacity reached; retain and review this session")
 	}
 	if err == nil {
-		file := s.file
-		if file == nil {
-			file, err = os.OpenFile(s.path, os.O_WRONLY|os.O_APPEND, 0600)
-			if err == nil {
-				defer file.Close()
+		draft := newSession(s.info, s.store)
+		draft.profile = s.profile
+		draft.bytes = s.bytes + int64(len(data))
+		draft.queue = cloneQueue(s.queue)
+		draft.queueSeq = s.queueSeq
+		draft.submittedQueueTurns = append([]string{}, s.submittedQueueTurns...)
+		draft.lastTurnStatus = s.lastTurnStatus
+		draft.info.LastSeq = e.Seq
+		if e.Kind == "session.state" {
+			draft.info.State = e.Status
+		}
+		if e.Kind == "session.identity" {
+			draft.info.AgentSessionID = e.AgentSessionID
+		}
+		draft.applyMetadataLocked(e)
+		if e.Kind == "prompt.queue" {
+			draft.queueSeq = e.Seq
+			draft.submittedQueueTurns = nil
+		}
+		if e.Kind == "item.snapshot" && e.Role == "user" && e.Status == "submitted" && s.queueSeq > 0 {
+			for _, queued := range s.queue.Items {
+				if queued.ID == e.TurnID {
+					draft.submittedQueueTurns = append(draft.submittedQueueTurns, e.TurnID)
+					break
+				}
 			}
 		}
-		data = append(data, '\n')
-		var n int
+		err = s.store.append(draft.record(), s.info.LastSeq, e)
 		if err == nil {
-			n, err = file.Write(data)
-		}
-		if err == nil && n != len(data) {
-			err = io.ErrShortWrite
-		}
-		if err == nil {
-			err = file.Sync()
+			s.queueSeq = draft.queueSeq
+			s.submittedQueueTurns = draft.submittedQueueTurns
 		}
 	}
 	if err != nil {
-		s.storageErr = errors.New("event persistence failed; session stopped")
+		s.storageErr = errors.Join(errors.New("event persistence failed; session stopped"), err)
 		s.info.State = "disconnected"
 		close(s.changed)
 		s.changed = make(chan struct{})
 		return s.storageErr
 	}
 	s.bytes += int64(len(data))
-	if s.events != nil {
-		s.events = append(s.events, e)
-	}
 	s.info.LastSeq = e.Seq
 	if e.Kind == "session.state" {
 		s.info.State = e.Status
@@ -366,23 +309,15 @@ func (b *Broker) Create(ctx context.Context, key string, c Create) (Session, err
 	if b.activeSessionsLocked() >= MaxSessions {
 		return Session{}, errors.New("worker capacity reached; close a worker before starting another")
 	}
-	file, err := os.OpenFile(filepath.Join(b.root, id+".jsonl"), os.O_CREATE|os.O_EXCL|os.O_WRONLY|os.O_APPEND, 0600)
-	if err != nil {
-		return Session{}, errors.New("cannot create the private session journal")
-	}
 	info := Session{SchemaVersion: Schema, ID: id, Scope: c, Provider: p.Provider, State: "starting", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), Options: p.Defaults, MetadataRevision: 1, RuntimeID: "r_" + randomID()}
-	data, _ := json.Marshal(sessionRecord{Session: info, ProfileSnapshot: &p})
-	data = append(data, '\n')
-	if _, err = file.Write(data); err == nil {
-		err = file.Sync()
+	s := newSession(info, b.store)
+	s.profile = p
+	if len(b.sessions) >= MaxRetainedSessions {
+		return Session{}, errors.New("retained conversation capacity reached")
 	}
-	if err != nil {
-		file.Close()
+	if err := b.store.create(ctx, s.record()); err != nil {
 		return Session{}, err
 	}
-	s := newSession(info, file)
-	s.profile = p
-	s.bytes = int64(len(data))
 	b.sessions[id] = s
 	b.wg.Add(1)
 	go func() { defer b.wg.Done(); b.connect(ctx, s, p, true, info.RuntimeID) }()
@@ -404,7 +339,7 @@ func (b *Broker) connect(binding context.Context, s *liveSession, p Profile, fre
 	if old != nil {
 		_ = old.Close()
 	}
-	defer func() { s.mu.Lock(); s.opening = nil; s.releaseJournalLocked(); s.mu.Unlock() }()
+	defer func() { s.mu.Lock(); s.opening = nil; s.releaseHistoryLocked(); s.mu.Unlock() }()
 	cwd, err := b.prepare(ctx, scope, id, fresh)
 	if err == nil {
 		err = ctx.Err()
@@ -638,7 +573,7 @@ func (b *Broker) startPromptLocked(s *liveSession, turn, prompt string, options,
 			}
 			_ = s.appendLocked(Event{Kind: "session.state", Status: state})
 		}
-		s.releaseJournalLocked()
+		s.releaseHistoryLocked()
 		s.mu.Unlock()
 		cancel()
 		if err != nil || !ended {
@@ -721,7 +656,7 @@ func (b *Broker) askRuntime(s *liveSession, ctx context.Context, r Request, runt
 	if !remaining && s.current == turn && !s.ended && s.info.State == "awaiting-input" {
 		_ = s.appendLocked(Event{Kind: "session.state", Status: "running", TurnID: turn})
 	}
-	s.releaseJournalLocked()
+	s.releaseHistoryLocked()
 	s.mu.Unlock()
 	return answer, err
 }
@@ -813,10 +748,6 @@ func (b *Broker) ReconnectContext(ctx context.Context, id string) error {
 		s.mu.Unlock()
 		return ErrUnavailable
 	}
-	if err = s.activateJournalLocked(); err != nil {
-		s.mu.Unlock()
-		return err
-	}
 	runtimeID := "r_" + randomID()
 	err = s.appendLocked(Event{Kind: "session.runtime", RuntimeID: runtimeID})
 	if err == nil {
@@ -841,7 +772,7 @@ func (b *Broker) CloseSession(id string) error {
 	return err
 }
 
-// Replay is bounded per response, cursor-checked and scoped to one journal.
+// Replay is bounded per response, cursor-checked and scoped to one conversation.
 // Browsers reconnect to this log, never to Prompt.
 func (b *Broker) Replay(id string, after uint64) ([]Event, <-chan struct{}, error) {
 	s, err := b.get(id)
@@ -854,14 +785,9 @@ func (b *Broker) Replay(id string, after uint64) ([]Event, <-chan struct{}, erro
 		return nil, nil, ErrCursor
 	}
 	end := min(s.info.LastSeq, after+256)
-	var result []Event
-	if s.events != nil {
-		result = append([]Event{}, s.events[after:end]...)
-	} else {
-		result, err = s.readEventsLocked(after, end)
-		if err != nil {
-			return nil, nil, err
-		}
+	result, err := s.readEventsLocked(after, end)
+	if err != nil {
+		return nil, nil, err
 	}
 	if len(result) == 0 && s.storageErr != nil {
 		return nil, nil, s.storageErr
@@ -890,7 +816,7 @@ func (b *Broker) Close() error {
 				p.cancel()
 			}
 		}
-		if s.info.State != "closed" {
+		if s.info.State != "closed" && s.info.State != "disconnected" {
 			_ = s.appendLocked(Event{Kind: "session.state", Status: "disconnected", Text: "Local host stopped; no automatic task retry."})
 		}
 		s.mu.Unlock()
@@ -901,14 +827,10 @@ func (b *Broker) Close() error {
 			_ = driver.Close()
 		}
 	}
-	// Wait for all opens and active turn finalizers before closing the journals.
+	// Wait for all opens and active turn finalizers before retiring the host.
 	b.wg.Wait()
 	for _, s := range sessions {
 		s.mu.Lock()
-		if s.file != nil {
-			_ = s.file.Close()
-			s.file = nil
-		}
 		s.storageErr = ErrUnavailable
 		s.mu.Unlock()
 	}

@@ -1,38 +1,34 @@
 package agentruntime
 
-import "net/http"
+import (
+	"context"
+	"net/http"
+)
 
-// OpenOptions is the shared host assembly. A product supplies Prepare and may
-// mount its own routes beside the runtime. It does not supply a second broker,
-// event log, or provider settings file.
+// OpenOptions requires explicit storage capabilities. The host owns transport
+// lifetime; this library neither discovers storage nor starts its provider.
 type OpenOptions struct {
-	JournalDir        string
-	SettingsFile      string
+	Storage           *Store
+	Settings          *Store
 	BasePath          string
 	Prepare           Prepare
 	Factory           Factory
 	EvaluateDecisions bool
 }
 
-// Open loads provider settings, starts one broker, and mounts its HTTP API.
 func Open(mux *http.ServeMux, options OpenOptions) (*Broker, error) {
-	settings := options.SettingsFile
-	if settings == "" {
-		var err error
-		settings, err = DefaultSettingsPath()
-		if err != nil {
-			return nil, err
-		}
+	if options.Storage == nil || options.Settings == nil {
+		return nil, ErrUnavailable
 	}
-	profiles, err := LoadConfig(settings)
+	profiles, _, err := options.Settings.profiles(context.Background())
 	if err != nil {
 		return nil, err
 	}
-	broker, err := NewBroker(options.JournalDir, profiles, options.Prepare, options.Factory)
+	broker, err := NewBroker(options.Storage, profiles, options.Prepare, options.Factory)
 	if err != nil {
 		return nil, err
 	}
-	if err = ConfigureBroker(broker, BrokerOptions{SettingsFile: settings}); err != nil {
+	if err = ConfigureBroker(broker, BrokerOptions{Settings: options.Settings}); err != nil {
 		broker.Close()
 		return nil, err
 	}

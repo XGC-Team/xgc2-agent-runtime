@@ -1,0 +1,21 @@
+{
+  "format": "storage-v1",
+  "namespaces": [{
+    "id": "agent-runtime", "owner": "agent-runtime", "schema": "agent-runtime.v1",
+    "max_scopes": 256, "max_receipts": 500000, "receipt_ttl_seconds": 604800,
+    "collections": [
+      {"id":"sessions","max_record_bytes":65536,"max_records":2048,"max_bytes":8388608,
+       "retention":"Product owner retains saved conversations; capacity requires explicit reviewed archival/export",
+       "recovery":"New-model storage backup; atomic session/event/prompt receipts"},
+      {"id":"events","max_record_bytes":3145728,"max_records":1000000,"max_bytes":536870912,
+       "retention":"Saved conversation history; no automatic user transcript deletion",
+       "recovery":"Storage backup; ordered sequence and state commit together"},
+      {"id":"prompts","max_record_bytes":4096,"max_records":100000,"max_bytes":16777216,
+       "retention":"Prompt identity retained with conversation history",
+       "recovery":"Storage backup; prompt identity commits with its event"},
+      {"id":"settings","max_record_bytes":65536,"max_records":1,"max_bytes":65536,
+       "retention":"Operator-owned provider settings replaced by explicit revision CAS",
+       "recovery":"Storage backup; executable snapshot remains pinned to existing conversations"}
+    ]
+  }]
+}

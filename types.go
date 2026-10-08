@@ -55,27 +55,11 @@ type Provider struct {
 	ToolMode            string `json:"toolMode"`
 }
 
-func LoadConfig(path string) ([]Profile, error) {
-	if path == "" {
-		return nil, nil
+func decodeConfigBytes(raw []byte) ([]Profile, error) {
+	if len(raw) > 64<<10 {
+		return nil, errors.New("agent runtime configuration exceeds capacity")
 	}
-	f, err := os.Open(path)
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, errors.New("cannot read agent runtime configuration")
-	}
-	defer f.Close()
-	profiles, err := decodeConfig(f)
-	if err != nil {
-		return nil, err
-	}
-	raw, readErr := os.ReadFile(path)
-	if readErr == nil && bytes.Contains(raw, []byte("xgc.native-agent/v1")) {
-		_ = os.WriteFile(path, bytes.Replace(raw, []byte("xgc.native-agent/v1"), []byte(Schema), 1), 0600)
-	}
-	return profiles, nil
+	return decodeConfig(bytes.NewReader(raw))
 }
 func decodeConfig(r io.Reader) ([]Profile, error) {
 	var err error
@@ -87,9 +71,6 @@ func decodeConfig(r io.Reader) ([]Profile, error) {
 	}
 	if err = d.Decode(new(any)); err != io.EOF {
 		return nil, errors.New("trailing agent runtime configuration")
-	}
-	if c.SchemaVersion == "xgc.native-agent/v1" {
-		c.SchemaVersion = Schema
 	}
 	if c.SchemaVersion != Schema || len(c.Profiles) > 16 {
 		return nil, errors.New("unsupported agent runtime configuration")

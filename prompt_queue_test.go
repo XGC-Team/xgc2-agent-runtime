@@ -118,7 +118,7 @@ func TestQueuedMessagesSurviveRestartWithoutAutomaticReplay(t *testing.T) {
 		t.Fatal(e)
 	}
 	b.Close()
-	restored, e := NewBroker(b.root, []Profile{p}, b.prepare, b.factory)
+	restored, e := NewBroker(b.store, []Profile{p}, b.prepare, b.factory)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -135,7 +135,7 @@ func TestQueuedMessagesSurviveRestartWithoutAutomaticReplay(t *testing.T) {
 		t.Fatal(e)
 	}
 	restored.Close()
-	again, e := NewBroker(b.root, []Profile{p}, b.prepare, b.factory)
+	again, e := NewBroker(b.store, []Profile{p}, b.prepare, b.factory)
 	if e != nil {
 		t.Fatal(e)
 	}

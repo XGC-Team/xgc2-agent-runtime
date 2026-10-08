@@ -85,7 +85,7 @@ func scopeWaitState(t *testing.T, b *Broker, id, state string) {
 }
 func TestBrokerBindsPersistedScopeBeforeOpenAndOnResume(t *testing.T) {
 	profile := scopeProfile(t)
-	root := scopePrivateDirectory(t)
+	root := testStorage(t)
 	workspace := t.TempDir()
 	scope := Create{ProfileID: profile.ID, Context: ContextRef{Kind: "experiment", ID: "experiment-a"}, Workspace: WorkspaceRef{ID: "workspace", Revision: "reviewed-v1"}, AgentAccessConfirmed: true}
 	bound := make(chan scopeReceipt, 4)
@@ -159,7 +159,7 @@ func TestRejectedSessionBindingNeverOpensAndIsClosed(t *testing.T) {
 	bound := make(chan scopeReceipt, 1)
 	opened := make(chan scopeReceipt, 1)
 	closed := make(chan struct{})
-	broker, err := NewBroker(scopePrivateDirectory(t), []Profile{profile}, func(context.Context, Create, string, bool) (string, error) { return t.TempDir(), nil }, func(_ Profile, sink Sink, _ Ask) (Driver, error) {
+	broker, err := NewBroker(testStorage(t), []Profile{profile}, func(context.Context, Create, string, bool) (string, error) { return t.TempDir(), nil }, func(_ Profile, sink Sink, _ Ask) (Driver, error) {
 		return &scopedFixtureDriver{sink: sink, bound: bound, opened: opened, closed: closed, bindError: true}, nil
 	})
 	if err != nil {

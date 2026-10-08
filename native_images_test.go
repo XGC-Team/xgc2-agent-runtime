@@ -3,11 +3,9 @@ package agentruntime
 import (
 	"bytes"
 	"encoding/base64"
-	"encoding/json"
 	"image"
 	"image/color"
 	"image/png"
-	"os"
 	"testing"
 )
 
@@ -26,23 +24,15 @@ func nativeImageFixture(t *testing.T) (map[string]any, string) {
 func TestNativeMCPImageSurvivesJournalWithoutChangingBytes(t *testing.T) {
 	block, data := nativeImageFixture(t)
 	details := codexItemDetails(map[string]any{"type": "mcpToolCall", "server": "fixture", "tool": "view", "result": map[string]any{"content": []any{block}}})
-	file, err := os.CreateTemp(t.TempDir(), "image-*.jsonl")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer file.Close()
-	session := newSession(Session{ID: "s_image", Provider: "codex"}, file)
+	session := testSession(t, "s_image")
 	if err := session.appendLocked(Event{Kind: "item.snapshot", Role: "tool", ItemID: "view-1", Details: details}); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(file.Name())
+	events, err := session.readEventsLocked(0, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var event Event
-	if err := json.Unmarshal(raw, &event); err != nil {
-		t.Fatal(err)
-	}
+	event := events[0]
 	kept := obj(arr(obj(event.Details["result"])["content"])[0])
 	if kept["data"] != data || kept["width"] != float64(16) || kept["height"] != float64(8) {
 		t.Fatal("image changed across journal")

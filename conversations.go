@@ -190,9 +190,8 @@ func (b *Broker) List(_ context.Context, options SessionListOptions) (SessionPag
 }
 
 type PendingRequest struct {
-	Request   Request        `json:"request"`
-	Submitted bool           `json:"submitted"`
-	Facts     *DecisionFacts `json:"facts,omitempty"`
+	Request   Request `json:"request"`
+	Submitted bool    `json:"submitted"`
 }
 
 func (b *Broker) Inputs(_ context.Context, id string) ([]PendingRequest, error) {
@@ -205,11 +204,7 @@ func (b *Broker) Inputs(_ context.Context, id string) ([]PendingRequest, error) 
 	items := []PendingRequest{}
 	for _, p := range s.inputs {
 		if p.active {
-			item := PendingRequest{Request: p.request, Submitted: p.answer != nil}
-			if facts, known := nativeDecisionFacts(s.info, p.request, s.cwd); known {
-				item.Facts = &facts
-			}
-			items = append(items, item)
+			items = append(items, PendingRequest{Request: p.request, Submitted: p.answer != nil})
 		}
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Request.ID < items[j].Request.ID })
@@ -298,8 +293,8 @@ type DecisionReceipt struct {
 type decisionActorKey struct{}
 type decisionPolicyKey struct{}
 
-// These hooks are for authenticated host composition. HTTP bodies and provider
-// tool arguments cannot populate the actor or policy in an audit receipt.
+// These hooks are for authenticated host composition. Request bodies and
+// provider tool arguments cannot populate the actor or policy in an audit receipt.
 func WithDecisionActor(ctx context.Context, actor DecisionActor) context.Context {
 	return context.WithValue(ctx, decisionActorKey{}, actor)
 }

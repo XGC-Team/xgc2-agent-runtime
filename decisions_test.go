@@ -3,106 +3,14 @@ package agentruntime
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 )
 
-func policyFixture(facts DecisionFacts, mode DecisionMode, now time.Time) DecisionPolicySnapshot {
-	return DecisionPolicySnapshot{ID: "operator-policy", Revision: "policy-revision-4", Actor: DecisionActor{ID: "station-owner"}, Rules: []DecisionRule{{ID: "one-rule", Mode: mode, Scope: facts, IssuedAt: now.Add(-time.Second), ExpiresAt: now.Add(time.Minute), RemainingUses: 1}}}
-}
-
-func factsFixture() DecisionFacts {
-	return DecisionFacts{Operation: "native.shell.execute", ExperimentID: "exp-a", ConversationID: "conversation-a", Workspace: WorkspaceRef{ID: "project", Revision: "reviewed"}, TargetID: "local", ParametersDigest: strings.Repeat("a", 64)}
-}
-
-func TestDecisionPolicyExactScopeAndAuthorityNamespaces(t *testing.T) {
-	now := time.Date(2026, 9, 8, 0, 0, 0, 0, time.UTC)
-	facts := factsFixture()
-	policy := policyFixture(facts, DecisionAuto, now)
-	result := EvaluateDecisionPolicy(now, facts, policy)
-	if result.Mode != DecisionAuto || result.Actor.ID != "station-owner" || result.PolicyRevision != policy.Revision || result.RuleID != "one-rule" {
-		t.Fatalf("evaluation=%+v", result)
-	}
-	for name, change := range map[string]func(*DecisionFacts){
-		"experiment":           func(f *DecisionFacts) { f.ExperimentID = "exp-b" },
-		"conversation":         func(f *DecisionFacts) { f.ConversationID = "conversation-b" },
-		"workspace":            func(f *DecisionFacts) { f.Workspace.ID = "another-project" },
-		"workspace-revision":   func(f *DecisionFacts) { f.Workspace.Revision = "changed" },
-		"experiment-session":   func(f *DecisionFacts) { f.ExperimentSessionID = "new-run" },
-		"target":               func(f *DecisionFacts) { f.TargetID = "robot-b" },
-		"parameters":           func(f *DecisionFacts) { f.ParametersDigest = strings.Repeat("b", 64) },
-		"robot-permission":     func(f *DecisionFacts) { f.Operation = "gcs.robot.unlock" },
-		"provider-full-access": func(f *DecisionFacts) { f.Operation = "full-access" },
-		"unknown":              func(f *DecisionFacts) { f.Operation = "gcs.anything" },
-	} {
-		t.Run(name, func(t *testing.T) {
-			changed := facts
-			change(&changed)
-			if got := EvaluateDecisionPolicy(now, changed, policy); got.Mode != DecisionManual {
-				t.Fatalf("scope mismatch=%+v", got)
-			}
-		})
-	}
-	if policy.Rules[0].RemainingUses != 1 {
-		t.Fatal("pure evaluation consumed a persisted rule")
-	}
-	robot := facts
-	robot.Operation = "gcs.robot.unlock"
-	robot.ExperimentSessionID = "frozen-run"
-	robot.TargetID = "robot-a"
-	robotPolicy := policyFixture(robot, DecisionAuto, now)
-	if got := EvaluateDecisionPolicy(now, robot, robotPolicy); got.Mode != DecisionAuto {
-		t.Fatalf("exact GCS grant=%+v", got)
-	}
-	if got := EvaluateDecisionPolicy(now, facts, robotPolicy); got.Mode != DecisionManual {
-		t.Fatal("robot approval escaped into native execution")
-	}
-}
-
-func TestDecisionPolicyExpiryUsesAndDenyPrecedence(t *testing.T) {
-	now := time.Now().UTC()
-	facts := factsFixture()
-	for name, change := range map[string]func(*DecisionPolicySnapshot){
-		"expired":          func(p *DecisionPolicySnapshot) { p.Rules[0].ExpiresAt = now },
-		"exhausted":        func(p *DecisionPolicySnapshot) { p.Rules[0].RemainingUses = 0 },
-		"future":           func(p *DecisionPolicySnapshot) { p.Rules[0].IssuedAt = now.Add(time.Minute) },
-		"unbounded-ttl":    func(p *DecisionPolicySnapshot) { p.Rules[0].ExpiresAt = now.Add(2 * time.Hour) },
-		"operator-missing": func(p *DecisionPolicySnapshot) { p.Actor.ID = "" },
-		"revision-missing": func(p *DecisionPolicySnapshot) { p.Revision = "" },
-		"wildcard":         func(p *DecisionPolicySnapshot) { p.Rules[0].Scope.ConversationID = "*" },
-	} {
-		t.Run(name, func(t *testing.T) {
-			policy := policyFixture(facts, DecisionAuto, now)
-			change(&policy)
-			if result := EvaluateDecisionPolicy(now, facts, policy); result.Mode != DecisionManual {
-				t.Fatalf("invalid rule=%+v", result)
-			}
-		})
-	}
-	policy := policyFixture(facts, DecisionAuto, now)
-	manual := policy.Rules[0]
-	manual.ID = "manual"
-	manual.Mode = DecisionManual
-	deny := policy.Rules[0]
-	deny.ID = "deny"
-	deny.Mode = DecisionDeny
-	policy.Rules = append(policy.Rules, manual)
-	if result := EvaluateDecisionPolicy(now, facts, policy); result.Mode != DecisionManual || result.RuleID != "manual" {
-		t.Fatalf("manual override=%+v", result)
-	}
-	policy.Rules = append(policy.Rules, deny)
-	if result := EvaluateDecisionPolicy(now, facts, policy); result.Mode != DecisionDeny || result.RuleID != "deny" {
-		t.Fatalf("deny override=%+v", result)
-	}
-	robot := facts
-	robot.Operation = "gcs.experiment.restart"
-	policy = policyFixture(robot, DecisionAuto, now)
-	policy.Rules[0].ExpiresAt = now.Add(6 * time.Minute)
-	if result := EvaluateDecisionPolicy(now, robot, policy); result.Mode != DecisionManual {
-		t.Fatalf("long robot grant=%+v", result)
-	}
+// evaluation is what a host evaluator returns when its policy matched a rule.
+func evaluation(mode DecisionMode) PolicyEvaluation {
+	return PolicyEvaluation{Mode: mode, PolicyID: "operator-policy", PolicyRevision: "policy-revision-4", RuleID: "one-rule", Actor: DecisionActor{ID: "station-owner"}, Reason: "matched_rule"}
 }
 
 type policyDriver struct {
@@ -165,12 +73,17 @@ func TestBrokerPolicyUsesDurableRequestsAndNormalDecisionAudit(t *testing.T) {
 				}
 				// A callback cannot mutate the retained provider option list.
 				input.Request.Options[0].ID = "forged-option"
-				now := time.Now().UTC()
-				result := EvaluateDecisionPolicy(now, input.Facts, policyFixture(input.Facts, mode, now))
+				live, _ := b.get(input.Session.ID)
+				live.mu.Lock()
+				cwd := live.cwd
+				live.mu.Unlock()
+				if cwd == "" || input.Cwd != cwd {
+					t.Errorf("cwd=%q session cwd=%q", input.Cwd, cwd)
+				}
 				if reserved.Add(1) != 1 {
 					t.Error("policy reserved more than one use")
 				}
-				return result, ctx.Err()
+				return evaluation(mode), ctx.Err()
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -217,8 +130,7 @@ func TestBrokerManualDecisionWinsWhilePolicyIsPending(t *testing.T) {
 		case <-ctx.Done():
 			return PolicyEvaluation{}, ctx.Err()
 		}
-		now := time.Now().UTC()
-		return EvaluateDecisionPolicy(now, input.Facts, policyFixture(input.Facts, DecisionAuto, now)), nil
+		return evaluation(DecisionAuto), nil
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -263,21 +175,21 @@ func TestBrokerManualDecisionWinsWhilePolicyIsPending(t *testing.T) {
 	}
 }
 
-func TestBrokerPolicyCannotInventAnswersOrUnknownEffects(t *testing.T) {
-	for _, kind := range []string{"question", "plan", "unknown"} {
+func TestBrokerPolicyCannotInventAnswersOrReviewTruncatedOperations(t *testing.T) {
+	for _, kind := range []string{"question", "plan", "truncated"} {
 		t.Run(kind, func(t *testing.T) {
 			request := policyRequestFixture()
-			request.Kind = kind
-			if kind == "unknown" {
-				request.Kind = "permission"
-				request.SourceMethod = "unrecognized:tool"
-				request.Title = "gcs.robot.unlock native.shell.execute"
+			switch kind {
+			case "truncated":
+				request.Details.Truncated = true
+			default:
+				request.Kind = kind
 			}
 			b, s, _ := policyBroker(t, request)
 			var calls atomic.Int32
 			b.SetDecisionEvaluator(func(context.Context, DecisionInput) (PolicyEvaluation, error) {
 				calls.Add(1)
-				return PolicyEvaluation{Mode: DecisionAuto}, nil
+				return evaluation(DecisionAuto), nil
 			})
 			if _, err := b.Prompt(bg, s.ID, "manual-only", PromptRequest{Text: "please run"}); err != nil {
 				t.Fatal(err)
@@ -285,7 +197,7 @@ func TestBrokerPolicyCannotInventAnswersOrUnknownEffects(t *testing.T) {
 			waitState(t, b, s.ID, "awaiting-input")
 			pending, _ := b.Inputs(bg, s.ID)
 			if calls.Load() != 0 {
-				t.Fatal("policy evaluated a user question, plan, or unknown effect")
+				t.Fatal("policy evaluated a user question, a plan or a truncated review")
 			}
 			if err := b.Answer(bg, s.ID, pending[0].Request.ID, Answer{Cancel: true}); err != nil {
 				t.Fatal(err)
@@ -297,10 +209,9 @@ func TestBrokerPolicyCannotInventAnswersOrUnknownEffects(t *testing.T) {
 	request.Options = []Option{{ID: "persistent", Kind: "allow_always"}}
 	b, s, _ := policyBroker(t, request)
 	evaluated := make(chan struct{})
-	b.SetDecisionEvaluator(func(_ context.Context, input DecisionInput) (PolicyEvaluation, error) {
+	b.SetDecisionEvaluator(func(context.Context, DecisionInput) (PolicyEvaluation, error) {
 		defer close(evaluated)
-		now := time.Now().UTC()
-		return EvaluateDecisionPolicy(now, input.Facts, policyFixture(input.Facts, DecisionAuto, now)), nil
+		return evaluation(DecisionAuto), nil
 	})
 	b.Prompt(bg, s.ID, "no-public-once", PromptRequest{Text: "please run"})
 	select {
@@ -339,63 +250,44 @@ func TestBrokerPolicyFailureLeavesManualRequestAvailable(t *testing.T) {
 	waitState(t, b, s.ID, "ready")
 }
 
-func TestDecisionPolicyOrdinaryGCSHasExactEmptyConversationScope(t *testing.T) {
-	now := time.Now().UTC()
-	facts := factsFixture()
-	facts.Operation = "gcs.workflow.confirm"
-	facts.ConversationID = ""
-	facts.Workspace = WorkspaceRef{}
-	policy := policyFixture(facts, DecisionAuto, now)
-	if got := EvaluateDecisionPolicy(now, facts, policy); got.Mode != DecisionAuto {
-		t.Fatalf("ordinary GCS scope %+v", got)
-	}
-	agent := facts
-	agent.ConversationID = "chat"
-	agent.Workspace = WorkspaceRef{ID: "project", Revision: "r1"}
-	if got := EvaluateDecisionPolicy(now, agent, policy); got.Mode != DecisionManual {
-		t.Fatal("empty scope acted as wildcard")
-	}
-	facts.Operation = "native.shell.execute"
-	policy = policyFixture(facts, DecisionAuto, now)
-	if got := EvaluateDecisionPolicy(now, facts, policy); got.Mode != DecisionManual {
-		t.Fatal("native policy accepted absent conversation/workspace")
-	}
-}
-
-func TestBrokerPolicyReevaluatesDurablePendingAndExposesCanonicalFacts(t *testing.T) {
+func TestBrokerPolicyReevaluatesDurablePendingRequests(t *testing.T) {
 	b, s, answers := policyBroker(t, policyRequestFixture())
 	if _, err := b.Prompt(bg, s.ID, "pending-then-policy", PromptRequest{Text: "please run"}); err != nil {
 		t.Fatal(err)
 	}
 	waitState(t, b, s.ID, "awaiting-input")
 	pending, err := b.Inputs(bg, s.ID)
-	if err != nil || len(pending) != 1 || pending[0].Facts == nil {
-		t.Fatalf("facts %+v %v", pending, err)
+	if err != nil || len(pending) != 1 || pending[0].Submitted {
+		t.Fatalf("pending %+v %v", pending, err)
 	}
-	facts := *pending[0].Facts
-	if facts.ConversationID != s.ID || facts.Workspace != s.Scope.Workspace || facts.Operation != "native.shell.execute" {
-		t.Fatalf("facts %+v", facts)
-	}
+	var seen atomic.Pointer[Request]
 	b.SetDecisionEvaluator(func(_ context.Context, input DecisionInput) (PolicyEvaluation, error) {
-		if input.Facts != facts {
-			t.Errorf("changed canonical facts")
-		}
-		return EvaluateDecisionPolicy(time.Now(), input.Facts, policyFixture(facts, DecisionAuto, time.Now())), nil
+		seen.Store(&input.Request)
+		return evaluation(DecisionAuto), nil
 	})
 	if err := b.EvaluateInputs(bg, s.ID); err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case answer := <-answers:
-		if answer.OptionID != "yes" {
-			t.Fatalf("answer %+v", answer)
+		if answer.OptionID != "yes" || seen.Load() == nil || seen.Load().ID != pending[0].Request.ID {
+			t.Fatalf("answer %+v for %v", answer, seen.Load())
 		}
 	case <-time.After(time.Second):
 		t.Fatal("policy did not resolve retained request")
 	}
 	waitState(t, b, s.ID, "ready")
-	result, err := b.EvaluateDriverDecision(context.Background(), DecisionInput{Session: s, Request: pending[0].Request, Facts: facts})
-	if err != nil || result.Mode != DecisionManual {
-		t.Fatalf("completed runtime reused %+v %v", result, err)
+	// A request that already resolved is not evaluated again.
+	var calls atomic.Int32
+	b.SetDecisionEvaluator(func(context.Context, DecisionInput) (PolicyEvaluation, error) {
+		calls.Add(1)
+		return evaluation(DecisionAuto), nil
+	})
+	if err := b.EvaluateInputs(bg, s.ID); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	if calls.Load() != 0 {
+		t.Fatal("completed request was evaluated again")
 	}
 }

@@ -6,12 +6,11 @@ import "context"
 // broker's transport: it calls the broker directly or mounts Handler on its
 // edge. This library neither discovers storage nor starts its provider.
 type OpenOptions struct {
-	Storage           *Store
-	Settings          *Store
-	NativeFiles       *NativeFiles
-	Prepare           Prepare
-	Factory           Factory
-	EvaluateDecisions bool
+	Storage     *Store
+	Settings    *Store
+	NativeFiles *NativeFiles
+	Prepare     Prepare
+	Factory     Factory
 }
 
 func Open(options OpenOptions) (*Broker, error) {
@@ -29,12 +28,6 @@ func Open(options OpenOptions) (*Broker, error) {
 	if err = ConfigureBroker(broker, BrokerOptions{Settings: options.Settings}); err != nil {
 		broker.Close()
 		return nil, err
-	}
-	if options.EvaluateDecisions {
-		if err = broker.SetDecisionEvaluator(broker.EvaluateDriverDecision); err != nil {
-			broker.Close()
-			return nil, err
-		}
 	}
 	return broker, nil
 }

@@ -114,7 +114,7 @@ func (d *rpcDriver) Open(ctx context.Context, cwd, nativeID string) error {
 			return e
 		}
 		if text(obj(account["account"]), "type") != "chatgpt" {
-			return errors.New("ChatGPT login required; Research OS will not fall back to API billing")
+			return errors.New("ChatGPT login required; API billing is not used")
 		}
 		params := map[string]any{"cwd": cwd}
 		localMCPThreadContext(ctx, params)
@@ -163,7 +163,7 @@ func (d *rpcDriver) Open(ctx context.Context, cwd, nativeID string) error {
 				}
 			}
 			if !cached {
-				return errors.New("Grok cached login is unavailable; log in outside Research OS")
+				return errors.New("Grok cached login is unavailable; log in with the Grok client first")
 			}
 			if _, err = d.peer.Call(handshake, "authenticate", map[string]any{"methodId": "cached_token", "_meta": map[string]any{"headless": true}}); err != nil {
 				return err

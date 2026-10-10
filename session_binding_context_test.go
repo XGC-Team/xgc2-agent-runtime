@@ -65,7 +65,7 @@ func TestBrokerCarriesEphemeralBindingValuesWithoutRequestLifetimeOrJournal(t *t
 	if err := broker.Close(); err != nil {
 		t.Fatal(err)
 	}
-	events, _, err := broker.Replay(session.ID, 0)
+	events, _, err := broker.replay(session.ID, 0)
 	journal, _ := json.Marshal(events)
 	if err != nil {
 		t.Fatal(err)
@@ -78,7 +78,7 @@ func TestBrokerCarriesEphemeralBindingValuesWithoutRequestLifetimeOrJournal(t *t
 		t.Fatal(err)
 	}
 	defer restarted.Close()
-	if err := restarted.ReconnectContext(context.WithValue(context.Background(), privateBindingKey{}, "renewed-private-enrollment"), session.ID); err != nil {
+	if err := restarted.Reconnect(context.WithValue(context.Background(), privateBindingKey{}, "renewed-private-enrollment"), session.ID); err != nil {
 		t.Fatal(err)
 	}
 	scopeWait(t, bound)
@@ -93,7 +93,7 @@ func TestBrokerCarriesEphemeralBindingValuesWithoutRequestLifetimeOrJournal(t *t
 		t.Fatal(err)
 	}
 	defer last.Close()
-	if err := last.Reconnect(session.ID); err != nil {
+	if err := last.Reconnect(bg, session.ID); err != nil {
 		t.Fatal(err)
 	}
 	scopeWait(t, bound)

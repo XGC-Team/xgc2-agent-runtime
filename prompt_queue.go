@@ -1,7 +1,7 @@
 package agentruntime
 
 import (
-	"errors"
+	"context"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -65,7 +65,7 @@ func (s *liveSession) applyQueueEventLocked(e Event) {
 		}
 	}
 }
-func (b *Broker) Queue(id, key string, c QueueCommand) (PromptQueue, error) {
+func (b *Broker) Queue(_ context.Context, id, key string, c QueueCommand) (PromptQueue, error) {
 	if err := validKey(key); err != nil {
 		return PromptQueue{}, err
 	}
@@ -90,7 +90,7 @@ func (b *Broker) Queue(id, key string, c QueueCommand) (PromptQueue, error) {
 	switch c.Operation {
 	case "enqueue":
 		if !validQueuedText(c.Text) {
-			return PromptQueue{}, errors.New("prompt must be nonempty UTF-8 up to 128 KiB")
+			return PromptQueue{}, invalid("prompt must be nonempty UTF-8 up to 128 KiB")
 		}
 		turn := "t_" + hash(id + "\x00" + key)[:32]
 		for _, p := range q.Items {
@@ -112,7 +112,7 @@ func (b *Broker) Queue(id, key string, c QueueCommand) (PromptQueue, error) {
 			return q, nil
 		}
 		if len(q.Items) >= maxQueuedPrompts {
-			return PromptQueue{}, errors.New("message queue is full")
+			return PromptQueue{}, exhausted("message queue is full")
 		}
 		selected, err := b.selection(s.profile, c.Options)
 		if err != nil {
@@ -131,11 +131,11 @@ func (b *Broker) Queue(id, key string, c QueueCommand) (PromptQueue, error) {
 			}
 		}
 		if index < 0 {
-			return PromptQueue{}, ErrNotFound
+			return PromptQueue{}, classified{ErrNotFound, "queued message not found"}
 		}
 		if c.Operation == "edit" {
 			if !validQueuedText(c.Text) {
-				return PromptQueue{}, errors.New("invalid queued message")
+				return PromptQueue{}, invalid("invalid queued message")
 			}
 			q.Items[index].Text = c.Text
 		} else {
@@ -167,7 +167,7 @@ func (b *Broker) Queue(id, key string, c QueueCommand) (PromptQueue, error) {
 		}
 		q.Paused = false
 	default:
-		return PromptQueue{}, errors.New("unknown queue operation")
+		return PromptQueue{}, invalid("unknown queue operation")
 	}
 	if err := s.writeQueueLocked(q); err != nil {
 		return PromptQueue{}, err

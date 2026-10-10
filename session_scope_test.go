@@ -75,7 +75,7 @@ func scopeWaitState(t *testing.T, b *Broker, id, state string) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		session, err := b.Get(id)
+		session, err := b.Get(bg, id)
 		if err == nil && session.State == state {
 			return
 		}
@@ -133,7 +133,7 @@ func TestBrokerBindsPersistedScopeBeforeOpenAndOnResume(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resumed.Close()
-	if err := resumed.Reconnect(session.ID); err != nil {
+	if err := resumed.Reconnect(bg, session.ID); err != nil {
 		t.Fatal(err)
 	}
 	second := scopeWait(t, bound)
@@ -145,7 +145,7 @@ func TestBrokerBindsPersistedScopeBeforeOpenAndOnResume(t *testing.T) {
 		t.Fatal("native identity not resumed")
 	}
 	scopeWaitState(t, resumed, session.ID, "ready")
-	if err := resumed.CloseSession(session.ID); err != nil {
+	if err := resumed.CloseSession(bg, session.ID); err != nil {
 		t.Fatal(err)
 	}
 	select {

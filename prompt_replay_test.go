@@ -85,25 +85,28 @@ func TestPersistedPromptOptionsReplayKeepsJournalAndIdempotency(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer broker.Close()
-		replayed, _, err := broker.Replay(id, 0)
-		if err != nil || len(replayed) != len(events)+1 || !reflect.DeepEqual(replayed[:len(events)], events) || replayed[len(events)].Status != "disconnected" {
+		replayed, _, err := broker.replay(id, 0)
+		if err != nil || !reflect.DeepEqual(replayed, events) {
 			t.Fatalf("persisted events changed during restart: %v", err)
 		}
-		if got, err := broker.PromptWithOptions(id, key, events[2].Text, selected); err != nil || got != turn {
+		if restarted, err := broker.Get(bg, id); err != nil || restarted.State != "disconnected" {
+			t.Fatalf("restart state %+v: %v", restarted, err)
+		}
+		if got, err := broker.Prompt(bg, id, key, PromptRequest{Text: events[2].Text, Options: selected}); err != nil || got != turn {
 			t.Fatalf("identical retry was not restored: %s %v", got, err)
 		}
 		changed := selected
 		changed.Effort = "low"
-		if _, err := broker.PromptWithOptions(id, key, events[2].Text, changed); !errors.Is(err, ErrConflict) {
+		if _, err := broker.Prompt(bg, id, key, PromptRequest{Text: events[2].Text, Options: changed}); !errors.Is(err, ErrConflict) {
 			t.Fatalf("changed selections did not conflict: %v", err)
 		}
-		if _, err := broker.PromptWithOptions(id, key, "Changed fixture prompt", selected); !errors.Is(err, ErrConflict) {
+		if _, err := broker.Prompt(bg, id, key, PromptRequest{Text: "Changed fixture prompt", Options: selected}); !errors.Is(err, ErrConflict) {
 			t.Fatalf("changed text did not conflict: %v", err)
 		}
-		if _, err := broker.PromptWithOptions(id, key, events[2].Text, AgentOptions{}); !errors.Is(err, ErrConflict) {
+		if _, err := broker.Prompt(bg, id, key, PromptRequest{Text: events[2].Text, Options: AgentOptions{}}); !errors.Is(err, ErrConflict) {
 			t.Fatalf("dropped selections did not conflict: %v", err)
 		}
-		after, _, _ := broker.Replay(id, 0)
+		after, _, _ := broker.replay(id, 0)
 		if !reflect.DeepEqual(after, replayed) {
 			t.Fatal("idempotent retries appended or resent a prompt")
 		}

@@ -33,7 +33,7 @@ func settingsFixtureUpdate(t *testing.T, revision string, defaults AgentOptions)
 func TestSettingsDiscoveryCASAndCrossBrokerVisibility(t *testing.T) {
 	settings := testStorage(t)
 	a, b := settingsBroker(t, settings), settingsBroker(t, settings)
-	initial, err := a.Settings()
+	initial, err := a.Settings(bg)
 	if err != nil || len(initial.Providers) != 5 {
 		t.Fatalf("initial: %+v %v", initial, err)
 	}
@@ -54,7 +54,7 @@ func TestSettingsDiscoveryCASAndCrossBrokerVisibility(t *testing.T) {
 	if strings.Contains(string(raw), "never-surface-this") || strings.Contains(string(raw), "sha256") {
 		t.Fatalf("private probe data leaked: %s", raw)
 	}
-	other, err := b.Settings()
+	other, err := b.Settings(bg)
 	if err != nil || other.Revision != saved.Revision {
 		t.Fatalf("cross-broker revision: %+v %v", other, err)
 	}
@@ -79,7 +79,7 @@ func TestSettingsDiscoveryCASAndCrossBrokerVisibility(t *testing.T) {
 func TestSettingsConcurrentIndependentBrokersOnlyOneCASWinner(t *testing.T) {
 	settings := testStorage(t)
 	a, b := settingsBroker(t, settings), settingsBroker(t, settings)
-	initial, _ := a.Settings()
+	initial, _ := a.Settings(bg)
 	start := make(chan struct{})
 	results := make(chan error, 2)
 	var wg sync.WaitGroup
@@ -112,7 +112,7 @@ func TestSettingsConcurrentIndependentBrokersOnlyOneCASWinner(t *testing.T) {
 func TestNativeSelectionsCrossBrokerSnapshotAndIdempotency(t *testing.T) {
 	settings := testStorage(t)
 	settingsOwner, consumer := settingsBroker(t, settings), settingsBroker(t, settings)
-	initial, _ := settingsOwner.Settings()
+	initial, _ := settingsOwner.Settings(bg)
 	defaults := AgentOptions{Model: "fixture-native", Effort: "medium", Permission: "approval-required"}
 	saved, err := settingsOwner.UpdateSettings(context.Background(), settingsFixtureUpdate(t, initial.Revision, defaults))
 	if err != nil {
@@ -128,28 +128,28 @@ func TestNativeSelectionsCrossBrokerSnapshotAndIdempotency(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Existing session is pinned even after the other broker commits new defaults.
-	existing, _ := consumer.Get(s.ID)
+	existing, _ := consumer.Get(bg, s.ID)
 	if existing.Options != defaults {
 		t.Fatalf("session changed: %+v", existing.Options)
 	}
 	selected := AgentOptions{Model: "fixture-luna", Effort: "low", Permission: "approval-required"}
-	turn, err := consumer.PromptWithOptions(s.ID, "options-turn", "require-options", selected)
+	turn, err := consumer.Prompt(bg, s.ID, "options-turn", PromptRequest{Text: "require-options", Options: selected})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = consumer.PromptWithOptions(s.ID, "options-turn", "require-options", AgentOptions{Model: "fixture-native", Effort: "medium"}); !errors.Is(err, ErrConflict) {
+	if _, err = consumer.Prompt(bg, s.ID, "options-turn", PromptRequest{Text: "require-options", Options: AgentOptions{Model: "fixture-native", Effort: "medium"}}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("options changed replay must conflict: %v", err)
 	}
-	replay, err := consumer.PromptWithOptions(s.ID, "options-turn", "require-options", selected)
+	replay, err := consumer.Prompt(bg, s.ID, "options-turn", PromptRequest{Text: "require-options", Options: selected})
 	if err != nil || replay != turn {
 		t.Fatalf("replay %s %v", replay, err)
 	}
 	request := waitRequest(t, consumer, s.ID)
-	if err = consumer.Answer(s.ID, request.ID, Answer{OptionID: request.Options[0].ID}); err != nil {
+	if err = consumer.Answer(bg, s.ID, request.ID, Answer{OptionID: request.Options[0].ID}); err != nil {
 		t.Fatal(err)
 	}
 	waitState(t, consumer, s.ID, "ready")
-	events, _, _ := consumer.Replay(s.ID, 0)
+	events, _, _ := consumer.replay(s.ID, 0)
 	found := false
 	for _, e := range events {
 		if e.Kind == "turn.end" && e.Status == "completed" {
@@ -159,21 +159,21 @@ func TestNativeSelectionsCrossBrokerSnapshotAndIdempotency(t *testing.T) {
 	if !found {
 		t.Fatal("selected model/effort/permission did not pass actual native wire fixture")
 	}
-	current, _ := consumer.Get(s.ID)
+	current, _ := consumer.Get(bg, s.ID)
 	if current.Options != selected {
 		t.Fatal("session did not retain the latest selection")
 	}
-	if _, err = consumer.Prompt(s.ID, "inherit-options", "require-options"); err != nil {
+	if _, err = consumer.Prompt(bg, s.ID, "inherit-options", PromptRequest{Text: "require-options"}); err != nil {
 		t.Fatal(err)
 	}
 	waitState(t, consumer, s.ID, "awaiting-input")
-	events, _, _ = consumer.Replay(s.ID, current.LastSeq)
+	events, _, _ = consumer.replay(s.ID, current.LastSeq)
 	for _, event := range events {
 		if event.Kind == "input.request" {
 			request = *event.Request
 		}
 	}
-	if err = consumer.Answer(s.ID, request.ID, Answer{OptionID: request.Options[0].ID}); err != nil {
+	if err = consumer.Answer(bg, s.ID, request.ID, Answer{OptionID: request.Options[0].ID}); err != nil {
 		t.Fatal(err)
 	}
 	waitState(t, consumer, s.ID, "ready")
@@ -205,7 +205,7 @@ func TestNativeSelectionsCrossBrokerSnapshotAndIdempotency(t *testing.T) {
 func TestUnsupportedProviderOptionsAndSettingsSecurity(t *testing.T) {
 	settings := testStorage(t)
 	b := settingsBroker(t, settings)
-	initial, _ := b.Settings()
+	initial, _ := b.Settings(bg)
 	update := settingsFixtureUpdate(t, initial.Revision, AgentOptions{Model: "invented"})
 	if _, err := b.UpdateSettings(context.Background(), update); err == nil {
 		t.Fatal("unadvertised model accepted")
@@ -215,21 +215,16 @@ func TestUnsupportedProviderOptionsAndSettingsSecurity(t *testing.T) {
 	if _, err := b.UpdateSettings(context.Background(), update); err == nil {
 		t.Fatal("Codex permissions leaked into ACP")
 	}
-	mux := http.NewServeMux()
-	if err := RegisterRoutes(mux, b, "/api/agent-runtime"); err != nil {
-		t.Fatal(err)
-	}
+	handler := Handler(b, HandlerOptions{})
 	for _, body := range []string{`{"revision":"x","provider":{"id":"codex","provider":"codex","enabled":true,"defaults":{},"token":"bad"}}`, `{"id":"codex","args":["secret"]}`} {
-		path := "/api/agent-runtime/settings"
+		path := "/settings"
 		if strings.Contains(body, "args") {
 			path += "/refresh"
 		}
-		request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1"+path, strings.NewReader(body))
-		request.RemoteAddr = "127.0.0.1:12345"
-		request.Header.Set(ClientHeader, "1")
+		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 		request.Header.Set("Content-Type", "application/json")
 		response := httptest.NewRecorder()
-		mux.ServeHTTP(response, request)
+		handler.ServeHTTP(response, request)
 		if response.Code != http.StatusBadRequest {
 			t.Fatalf("unknown settings field status %d: %s", response.Code, response.Body.String())
 		}
@@ -239,7 +234,7 @@ func TestUnsupportedProviderOptionsAndSettingsSecurity(t *testing.T) {
 func TestRestartKeepsPrivateProfileSnapshotAndReplaySkipsDiscovery(t *testing.T) {
 	settings := testStorage(t)
 	b := settingsBroker(t, settings)
-	initial, _ := b.Settings()
+	initial, _ := b.Settings(bg)
 	defaults := AgentOptions{Model: "fixture-native", Effort: "medium", Permission: "approval-required"}
 	saved, err := b.UpdateSettings(context.Background(), settingsFixtureUpdate(t, initial.Revision, defaults))
 	if err != nil {
@@ -252,7 +247,7 @@ func TestRestartKeepsPrivateProfileSnapshotAndReplaySkipsDiscovery(t *testing.T)
 	waitState(t, b, s.ID, "ready")
 	selected := AgentOptions{Permission: "full-access"}
 	retained := mergeOptions(defaults, selected)
-	turn, err := b.PromptWithOptions(s.ID, "replay-without-probe", "fixture", selected)
+	turn, err := b.Prompt(bg, s.ID, "replay-without-probe", PromptRequest{Text: "fixture", Options: selected})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,13 +255,13 @@ func TestRestartKeepsPrivateProfileSnapshotAndReplaySkipsDiscovery(t *testing.T)
 	b.settings.mu.Lock()
 	b.settings.inventory = map[string]ProviderSetting{}
 	b.settings.mu.Unlock()
-	if replay, err := b.PromptWithOptions(s.ID, "replay-without-probe", "fixture", selected); err != nil || replay != turn {
+	if replay, err := b.Prompt(bg, s.ID, "replay-without-probe", PromptRequest{Text: "fixture", Options: selected}); err != nil || replay != turn {
 		t.Fatalf("prompt replay: %s %v", replay, err)
 	}
 	if _, err = b.Create(context.Background(), "snapshot-restart", scope("codex")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = b.PromptWithOptions(s.ID, "", "fixture", defaults); err == nil {
+	if _, err = b.Prompt(bg, s.ID, "", PromptRequest{Text: "fixture", Options: defaults}); err == nil {
 		t.Fatal("invalid key accepted")
 	}
 	b.settings.mu.Lock()
@@ -292,7 +287,7 @@ func TestRestartKeepsPrivateProfileSnapshotAndReplaySkipsDiscovery(t *testing.T)
 	if err = ConfigureBroker(restored, BrokerOptions{Settings: settings, NativeFiles: testNativeFiles(t)}); err != nil {
 		t.Fatal(err)
 	}
-	info, err := restored.Get(s.ID)
+	info, err := restored.Get(bg, s.ID)
 	if err != nil || info.Options != retained || restored.sessions[s.ID].profile.Defaults != retained {
 		t.Fatalf("restart changed retained selection: %+v %v", info, err)
 	}

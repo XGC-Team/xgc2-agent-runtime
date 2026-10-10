@@ -47,7 +47,7 @@ func TestPromptQueueOrdersEditsRemovesAndPausesAfterFailure(t *testing.T) {
 	b, d, _ := queueBroker(t)
 	s := createConversation(t, b, "queue")
 	put := func(key, text string) PromptQueue {
-		q, e := b.Queue(s.ID, key, QueueCommand{Operation: "enqueue", Text: text})
+		q, e := b.Queue(bg, s.ID, key, QueueCommand{Operation: "enqueue", Text: text})
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -61,18 +61,18 @@ func TestPromptQueueOrdersEditsRemovesAndPausesAfterFailure(t *testing.T) {
 	if len(q.Items) != 3 {
 		t.Fatalf("queue=%+v", q)
 	}
-	if _, e := b.Queue(s.ID, "bad", QueueCommand{Operation: "remove", ID: q.Items[0].ID, ExpectedRevision: q.Revision - 1}); !errors.Is(e, ErrConflict) {
+	if _, e := b.Queue(bg, s.ID, "bad", QueueCommand{Operation: "remove", ID: q.Items[0].ID, ExpectedRevision: q.Revision - 1}); !errors.Is(e, ErrConflict) {
 		t.Fatalf("stale edit=%v", e)
 	}
-	q, e := b.Queue(s.ID, "edit", QueueCommand{Operation: "edit", ID: q.Items[1].ID, Text: "third edited", ExpectedRevision: q.Revision})
+	q, e := b.Queue(bg, s.ID, "edit", QueueCommand{Operation: "edit", ID: q.Items[1].ID, Text: "third edited", ExpectedRevision: q.Revision})
 	if e != nil {
 		t.Fatal(e)
 	}
-	q, e = b.Queue(s.ID, "remove", QueueCommand{Operation: "remove", ID: q.Items[2].ID, ExpectedRevision: q.Revision})
+	q, e = b.Queue(bg, s.ID, "remove", QueueCommand{Operation: "remove", ID: q.Items[2].ID, ExpectedRevision: q.Revision})
 	if e != nil {
 		t.Fatal(e)
 	}
-	q, e = b.Queue(s.ID, "sort", QueueCommand{Operation: "reorder", Order: []string{q.Items[1].ID, q.Items[0].ID}, ExpectedRevision: q.Revision})
+	q, e = b.Queue(bg, s.ID, "sort", QueueCommand{Operation: "reorder", Order: []string{q.Items[1].ID, q.Items[0].ID}, ExpectedRevision: q.Revision})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -92,7 +92,7 @@ func TestPromptQueueOrdersEditsRemovesAndPausesAfterFailure(t *testing.T) {
 		t.Fatal("failure drained queue")
 	default:
 	}
-	_, e = b.Queue(s.ID, "resume", QueueCommand{Operation: "resume", ExpectedRevision: q.Revision})
+	_, e = b.Queue(bg, s.ID, "resume", QueueCommand{Operation: "resume", ExpectedRevision: q.Revision})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -109,11 +109,11 @@ func TestPromptQueueOrdersEditsRemovesAndPausesAfterFailure(t *testing.T) {
 func TestQueuedMessagesSurviveRestartWithoutAutomaticReplay(t *testing.T) {
 	b, _, p := queueBroker(t)
 	s := createConversation(t, b, "persist")
-	_, e := b.Queue(s.ID, "pause", QueueCommand{Operation: "pause"})
+	_, e := b.Queue(bg, s.ID, "pause", QueueCommand{Operation: "pause"})
 	if e != nil {
 		t.Fatal(e)
 	}
-	q, e := b.Queue(s.ID, "saved", QueueCommand{Operation: "enqueue", Text: "saved message"})
+	q, e := b.Queue(bg, s.ID, "saved", QueueCommand{Operation: "enqueue", Text: "saved message"})
 	if e != nil {
 		t.Fatal(e)
 	}

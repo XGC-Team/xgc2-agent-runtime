@@ -1,23 +1,20 @@
 package agentruntime
 
-import (
-	"context"
-	"net/http"
-)
+import "context"
 
-// OpenOptions requires explicit storage capabilities. The host owns transport
-// lifetime; this library neither discovers storage nor starts its provider.
+// OpenOptions requires explicit storage capabilities. The host owns the
+// broker's transport: it calls the broker directly or mounts Handler on its
+// edge. This library neither discovers storage nor starts its provider.
 type OpenOptions struct {
 	Storage           *Store
 	Settings          *Store
 	NativeFiles       *NativeFiles
-	BasePath          string
 	Prepare           Prepare
 	Factory           Factory
 	EvaluateDecisions bool
 }
 
-func Open(mux *http.ServeMux, options OpenOptions) (*Broker, error) {
+func Open(options OpenOptions) (*Broker, error) {
 	if options.Storage == nil || options.Settings == nil {
 		return nil, ErrUnavailable
 	}
@@ -38,10 +35,6 @@ func Open(mux *http.ServeMux, options OpenOptions) (*Broker, error) {
 			broker.Close()
 			return nil, err
 		}
-	}
-	if err = RegisterRoutes(mux, broker, options.BasePath); err != nil {
-		broker.Close()
-		return nil, err
 	}
 	return broker, nil
 }

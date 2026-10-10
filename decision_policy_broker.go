@@ -124,7 +124,7 @@ func (b *Broker) evaluatePending(ctx context.Context, session Session, request R
 			}
 			actorContext := WithDecisionActor(ctx, result.Actor)
 			actorContext = WithDecisionPolicy(actorContext, DecisionPolicy{ID: result.PolicyID, Revision: result.PolicyRevision})
-			err = b.AnswerContext(actorContext, session.ID, request.ID, Answer{OptionID: option.ID})
+			err = b.Answer(actorContext, session.ID, request.ID, Answer{OptionID: option.ID})
 			// An operator can resolve the durable request while policy evaluation
 			// is pending. Losing that CAS never overrides or retries their answer.
 			if err == nil || errors.Is(err, ErrConflict) || errors.Is(err, ErrStale) {
@@ -164,7 +164,7 @@ func (b *Broker) EvaluateDriverDecision(ctx context.Context, input DecisionInput
 
 // EvaluateInputs rechecks existing durable requests after an operator edits
 // policy. It neither accepts rules nor answers and uses the same request CAS.
-func (b *Broker) EvaluateInputs(id string) error {
+func (b *Broker) EvaluateInputs(_ context.Context, id string) error {
 	s, err := b.get(id)
 	if err != nil {
 		return err

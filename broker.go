@@ -9,16 +9,17 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
+
+	xrpc "github.com/XGC-Team/xgc2-xrpc/go"
 )
 
 const MaxSessions = 128
 const MaxEvents = 100000
 
-var ErrCursor = errors.New("event cursor is ahead of this session")
+// replayPage is how many events one storage read returns to a subscriber.
+const replayPage = 256
 
 type pendingInput struct {
 	request Request
@@ -160,7 +161,7 @@ func (s *liveSession) appendLocked(e Event) error {
 		return err
 	}
 	if len(data) > 3<<20 || s.bytes+int64(len(data)) > MaxSessionBytes || s.info.LastSeq >= MaxEvents {
-		err = errors.New("event storage capacity reached; retain and review this session")
+		err = exhausted("event storage capacity reached; retain and review this session")
 	}
 	if err == nil {
 		draft := newSession(s.info, s.store)
@@ -216,8 +217,10 @@ func (s *liveSession) appendLocked(e Event) error {
 	s.changed = make(chan struct{})
 	return nil
 }
-func (b *Broker) Providers() []Provider {
-	_ = b.reloadSettingsProfiles()
+func (b *Broker) Providers(ctx context.Context) ([]Provider, error) {
+	if err := b.reloadSettingsProfiles(); err != nil {
+		return nil, err
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	result := []Provider{}
@@ -243,7 +246,7 @@ func (b *Broker) Providers() []Provider {
 		result = append(result, Provider{ID: p.ID, Provider: p.Provider, Protocol: protocol, Available: err == nil && p.BillingReviewed && !p.Disabled, Detail: detail, ReviewedVersion: p.ReviewedVersion, InteractiveRequests: interactive, ToolMode: toolMode})
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
-	return result
+	return result, nil
 }
 func (b *Broker) Create(ctx context.Context, key string, c Create) (Session, error) {
 	if err := c.Validate(); err != nil {
@@ -310,13 +313,13 @@ func (b *Broker) Create(ctx context.Context, key string, c Create) (Session, err
 	}
 	p.Defaults = selected
 	if b.activeSessionsLocked() >= MaxSessions {
-		return Session{}, errors.New("worker capacity reached; close a worker before starting another")
+		return Session{}, exhausted("worker capacity reached; close a worker before starting another")
 	}
 	info := Session{SchemaVersion: Schema, ID: id, Scope: c, Provider: p.Provider, State: "starting", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), Options: p.Defaults, MetadataRevision: 1, RuntimeID: "r_" + randomID()}
 	s := newSession(info, b.store)
 	s.profile = p
 	if len(b.sessions) >= MaxRetainedSessions {
-		return Session{}, errors.New("retained conversation capacity reached")
+		return Session{}, exhausted("retained conversation capacity reached")
 	}
 	if err := b.store.create(ctx, s.record()); err != nil {
 		return Session{}, err
@@ -419,7 +422,7 @@ func (b *Broker) get(id string) (*liveSession, error) {
 	}
 	return s, nil
 }
-func (b *Broker) Get(id string) (Session, error) {
+func (b *Broker) Get(_ context.Context, id string) (Session, error) {
 	s, err := b.get(id)
 	if err != nil {
 		return Session{}, err
@@ -428,7 +431,7 @@ func (b *Broker) Get(id string) (Session, error) {
 	defer s.mu.Unlock()
 	return s.info, nil
 }
-func (b *Broker) List() []Session {
+func (b *Broker) list() []Session {
 	b.mu.Lock()
 	sessions := make([]*liveSession, 0, len(b.sessions))
 	for _, s := range b.sessions {
@@ -449,15 +452,13 @@ func (b *Broker) List() []Session {
 	})
 	return result
 }
-func (b *Broker) Prompt(id, key, prompt string) (string, error) {
-	return b.PromptWithOptions(id, key, prompt, AgentOptions{})
-}
-func (b *Broker) PromptWithOptions(id, key, prompt string, options AgentOptions) (string, error) {
+func (b *Broker) Prompt(ctx context.Context, id, key string, request PromptRequest) (string, error) {
+	prompt, options := request.Text, request.Options
 	if err := validKey(key); err != nil {
 		return "", err
 	}
-	if strings.TrimSpace(prompt) == "" || len(prompt) > 128<<10 || !utf8.ValidString(prompt) {
-		return "", errors.New("prompt must be nonempty UTF-8 up to 128 KiB")
+	if !validQueuedText(prompt) {
+		return "", invalid("prompt must be nonempty UTF-8 up to 128 KiB")
 	}
 	b.mu.Lock()
 	if b.closed {
@@ -494,7 +495,7 @@ func (b *Broker) PromptWithOptions(id, key, prompt string, options AgentOptions)
 	profile := candidate.profile
 	candidate.mu.Unlock()
 	b.mu.Unlock()
-	b.warmSelection(b.ctx, profile)
+	b.warmSelection(ctx, profile)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.closed {
@@ -616,7 +617,7 @@ func (b *Broker) askRuntime(s *liveSession, ctx context.Context, r Request, runt
 	}
 	if active >= 16 {
 		s.mu.Unlock()
-		return Answer{}, errors.New("too many pending user requests")
+		return Answer{}, exhausted("too many pending user requests")
 	}
 	r.ID = "q_" + randomID()
 	r.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
@@ -663,10 +664,7 @@ func (b *Broker) askRuntime(s *liveSession, ctx context.Context, r Request, runt
 	s.mu.Unlock()
 	return answer, err
 }
-func (b *Broker) Answer(id, requestID string, a Answer) error {
-	return b.AnswerContext(context.Background(), id, requestID, a)
-}
-func (b *Broker) AnswerContext(ctx context.Context, id, requestID string, a Answer) error {
+func (b *Broker) Answer(ctx context.Context, id, requestID string, a Answer) error {
 	s, err := b.get(id)
 	if err != nil {
 		return err
@@ -723,11 +721,10 @@ func (b *Broker) Cancel(ctx context.Context, id string) error {
 	}
 	return driver.Cancel(ctx) // Only native acknowledgement/exit can finish the turn.
 }
-func (b *Broker) Reconnect(id string) error { return b.ReconnectContext(context.Background(), id) }
 
-// ReconnectContext carries ephemeral composition metadata into explicit resume.
-// It is not persisted and cannot change the durable session scope.
-func (b *Broker) ReconnectContext(ctx context.Context, id string) error {
+// Reconnect carries the ephemeral composition values of ctx into the explicit
+// resume. They are not persisted and cannot change the durable session scope.
+func (b *Broker) Reconnect(ctx context.Context, id string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.closed {
@@ -763,7 +760,7 @@ func (b *Broker) ReconnectContext(ctx context.Context, id string) error {
 	}
 	return err
 }
-func (b *Broker) CloseSession(id string) error {
+func (b *Broker) CloseSession(_ context.Context, id string) error {
 	s, err := b.get(id)
 	if err != nil {
 		return err
@@ -775,9 +772,9 @@ func (b *Broker) CloseSession(id string) error {
 	return err
 }
 
-// Replay is bounded per response, cursor-checked and scoped to one conversation.
-// Browsers reconnect to this log, never to Prompt.
-func (b *Broker) Replay(id string, after uint64) ([]Event, <-chan struct{}, error) {
+// replay is bounded per response, cursor-checked and scoped to one conversation.
+// Subscribers reconnect to this log, never to Prompt.
+func (b *Broker) replay(id string, after uint64) ([]Event, <-chan struct{}, error) {
 	s, err := b.get(id)
 	if err != nil {
 		return nil, nil, err
@@ -787,7 +784,7 @@ func (b *Broker) Replay(id string, after uint64) ([]Event, <-chan struct{}, erro
 	if after > s.info.LastSeq {
 		return nil, nil, ErrCursor
 	}
-	end := min(s.info.LastSeq, after+256)
+	end := min(s.info.LastSeq, after+replayPage)
 	result, err := s.readEventsLocked(after, end)
 	if err != nil {
 		return nil, nil, err
@@ -796,6 +793,30 @@ func (b *Broker) Replay(id string, after uint64) ([]Event, <-chan struct{}, erro
 		return nil, nil, s.storageErr
 	}
 	return result, s.changed, nil
+}
+func (b *Broker) Subscribe(ctx context.Context, id string, after uint64, emit func(Event) error) error {
+	for {
+		events, changed, err := b.replay(id, after)
+		if err != nil {
+			return err
+		}
+		for _, e := range events {
+			if err = emit(e); err != nil {
+				return err
+			}
+			after = e.Seq
+		}
+		if len(events) == replayPage {
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-b.ctx.Done():
+			return ErrUnavailable
+		case <-changed:
+		}
+	}
 }
 func (b *Broker) Close() error {
 	b.mu.Lock()
@@ -839,9 +860,12 @@ func (b *Broker) Close() error {
 	}
 	return nil
 }
+
+// validKey accepts the XRPC request id grammar, which is what the XRPC service
+// passes as the idempotency key.
 func validKey(key string) error {
-	if !safeID.MatchString(key) {
-		return errors.New("Idempotency-Key must be 1-96 safe ASCII characters")
+	if !xrpc.ValidID(key) {
+		return invalid("the idempotency key must match [A-Za-z0-9._:-]{1,128}")
 	}
 	return nil
 }

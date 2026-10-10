@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
@@ -16,6 +15,9 @@ import (
 	"testing"
 	"time"
 )
+
+// bg is the context of calls whose cancellation a test does not exercise.
+var bg = context.Background()
 
 // TestMain doubles as a deterministic, real subprocess protocol fixture. It
 // never contacts a vendor, reads credentials, or claims a live subscription run.
@@ -184,7 +186,7 @@ func waitState(t *testing.T, b *Broker, id, state string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		s, e := b.Get(id)
+		s, e := b.Get(bg, id)
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -193,15 +195,15 @@ func waitState(t *testing.T, b *Broker, id, state string) {
 		}
 		time.Sleep(time.Millisecond * 5)
 	}
-	s, _ := b.Get(id)
-	events, _, _ := b.Replay(id, 0)
+	s, _ := b.Get(bg, id)
+	events, _, _ := b.replay(id, 0)
 	t.Fatalf("state=%s expected=%s events=%+v", s.State, state, events)
 }
 func waitRequest(t *testing.T, b *Broker, id string) Request {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		events, _, err := b.Replay(id, 0)
+		events, _, err := b.replay(id, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -220,18 +222,18 @@ func TestFiveNativeProviderSubprocessContracts(t *testing.T) {
 	for _, provider := range []string{"codex", "cursor", "opencode", "grok", "claude"} {
 		t.Run(provider, func(t *testing.T) {
 			b, s := testBroker(t, provider)
-			turn, err := b.Prompt(s.ID, "prompt-1", "hello")
+			turn, err := b.Prompt(bg, s.ID, "prompt-1", PromptRequest{Text: "hello"})
 			if err != nil {
 				t.Fatal(err)
 			}
 			if provider != "claude" {
 				r := waitRequest(t, b, s.ID)
-				if err = b.Answer(s.ID, r.ID, Answer{OptionID: r.Options[0].ID}); err != nil {
+				if err = b.Answer(bg, s.ID, r.ID, Answer{OptionID: r.Options[0].ID}); err != nil {
 					t.Fatal(err)
 				}
 			}
 			waitState(t, b, s.ID, "ready")
-			events, _, err := b.Replay(s.ID, 0)
+			events, _, err := b.replay(s.ID, 0)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -252,19 +254,19 @@ func TestFiveNativeProviderSubprocessContracts(t *testing.T) {
 }
 func TestCommandReplayConflictAndBusySession(t *testing.T) {
 	b, s := testBroker(t, "opencode")
-	a, err := b.Prompt(s.ID, "p1", "hello")
+	a, err := b.Prompt(bg, s.ID, "p1", PromptRequest{Text: "hello"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	waitRequest(t, b, s.ID)
-	same, err := b.Prompt(s.ID, "p1", "hello")
+	same, err := b.Prompt(bg, s.ID, "p1", PromptRequest{Text: "hello"})
 	if err != nil || same != a {
 		t.Fatal("exact prompt replay failed")
 	}
-	if _, err = b.Prompt(s.ID, "p1", "changed"); err != ErrConflict {
+	if _, err = b.Prompt(bg, s.ID, "p1", PromptRequest{Text: "changed"}); err != ErrConflict {
 		t.Fatalf("conflict=%v", err)
 	}
-	if _, err = b.Prompt(s.ID, "p2", "new"); err != ErrUnavailable {
+	if _, err = b.Prompt(bg, s.ID, "p2", PromptRequest{Text: "new"}); err != ErrUnavailable {
 		t.Fatalf("busy=%v", err)
 	}
 	again, err := b.Create(context.Background(), "create-1", scope("opencode"))
@@ -283,7 +285,11 @@ func TestConcurrentPromptReplayCreatesOneTurn(t *testing.T) {
 	errors := make(chan error, 16)
 	for i := 0; i < 16; i++ {
 		wg.Add(1)
-		go func() { defer wg.Done(); _, err := b.Prompt(s.ID, "same", "one prompt"); errors <- err }()
+		go func() {
+			defer wg.Done()
+			_, err := b.Prompt(bg, s.ID, "same", PromptRequest{Text: "one prompt"})
+			errors <- err
+		}()
 	}
 	wg.Wait()
 	close(errors)
@@ -292,7 +298,7 @@ func TestConcurrentPromptReplayCreatesOneTurn(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	events, _, _ := b.Replay(s.ID, 0)
+	events, _, _ := b.replay(s.ID, 0)
 	users := 0
 	for _, e := range events {
 		if e.Role == "user" {
@@ -305,29 +311,29 @@ func TestConcurrentPromptReplayCreatesOneTurn(t *testing.T) {
 }
 func TestPermissionValidationIsolationReplayAndCancel(t *testing.T) {
 	b, s := testBroker(t, "cursor")
-	_, _ = b.Prompt(s.ID, "p1", "hello")
+	_, _ = b.Prompt(bg, s.ID, "p1", PromptRequest{Text: "hello"})
 	r := waitRequest(t, b, s.ID)
-	if b.Answer(s.ID, r.ID, Answer{OptionID: "allow_always"}) == nil {
+	if b.Answer(bg, s.ID, r.ID, Answer{OptionID: "allow_always"}) == nil {
 		t.Fatal("unoffered decision accepted")
 	}
-	if b.Answer("other-session", r.ID, Answer{Cancel: true}) != ErrNotFound {
+	if b.Answer(bg, "other-session", r.ID, Answer{Cancel: true}) != ErrNotFound {
 		t.Fatal("cross session decision accepted")
 	}
 	answer := Answer{OptionID: r.Options[1].ID}
-	if err := b.Answer(s.ID, r.ID, answer); err != nil {
+	if err := b.Answer(bg, s.ID, r.ID, answer); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.Answer(s.ID, r.ID, answer); err != nil {
+	if err := b.Answer(bg, s.ID, r.ID, answer); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.Answer(s.ID, r.ID, Answer{Cancel: true}); err != ErrConflict {
+	if err := b.Answer(bg, s.ID, r.ID, Answer{Cancel: true}); err != ErrConflict {
 		t.Fatalf("decision drift=%v", err)
 	}
 	waitState(t, b, s.ID, "ready")
 }
 func TestNativeCancellationAndNoSilentCompletion(t *testing.T) {
 	b, s := testBroker(t, "grok")
-	_, _ = b.Prompt(s.ID, "p1", "hello")
+	_, _ = b.Prompt(bg, s.ID, "p1", PromptRequest{Text: "hello"})
 	r := waitRequest(t, b, s.ID)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -335,10 +341,10 @@ func TestNativeCancellationAndNoSilentCompletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitState(t, b, s.ID, "ready")
-	if err := b.Answer(s.ID, r.ID, Answer{OptionID: "allow"}); err != ErrStale {
+	if err := b.Answer(bg, s.ID, r.ID, Answer{OptionID: "allow"}); err != ErrStale {
 		t.Fatalf("stale answer=%v", err)
 	}
-	events, _, _ := b.Replay(s.ID, 0)
+	events, _, _ := b.replay(s.ID, 0)
 	found := false
 	for _, e := range events {
 		if e.Kind == "turn.end" && e.Status == "cancelled" {
@@ -351,9 +357,9 @@ func TestNativeCancellationAndNoSilentCompletion(t *testing.T) {
 }
 func TestJournalRestartReplaysWithoutPromptResend(t *testing.T) {
 	b, s := testBroker(t, "claude")
-	_, _ = b.Prompt(s.ID, "p1", "hello")
+	_, _ = b.Prompt(bg, s.ID, "p1", PromptRequest{Text: "hello"})
 	waitState(t, b, s.ID, "ready")
-	events, _, _ := b.Replay(s.ID, 0)
+	events, _, _ := b.replay(s.ID, 0)
 	cursor := events[len(events)-1].Seq
 	root, profiles, prepare := b.store, []Profile{testProfile(t, "claude")}, b.prepare
 	b.Close()
@@ -362,15 +368,15 @@ func TestJournalRestartReplaysWithoutPromptResend(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer recovered.Close()
-	snapshot, _ := recovered.Get(s.ID)
+	snapshot, _ := recovered.Get(bg, s.ID)
 	if snapshot.State != "disconnected" {
 		t.Fatalf("restart state=%s", snapshot.State)
 	}
-	turn, err := recovered.Prompt(s.ID, "p1", "hello")
+	turn, err := recovered.Prompt(bg, s.ID, "p1", PromptRequest{Text: "hello"})
 	if err != nil || turn == "" {
 		t.Fatalf("durable replay=%v", err)
 	}
-	remaining, _, err := recovered.Replay(s.ID, cursor)
+	remaining, _, err := recovered.replay(s.ID, cursor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -379,10 +385,10 @@ func TestJournalRestartReplaysWithoutPromptResend(t *testing.T) {
 			t.Fatal("restart resent user prompt")
 		}
 	}
-	if _, _, err = recovered.Replay(s.ID, 99999); err != ErrCursor {
+	if _, _, err = recovered.replay(s.ID, 99999); err != ErrCursor {
 		t.Fatal("ahead cursor accepted")
 	}
-	if err = recovered.Reconnect(s.ID); err != nil {
+	if err = recovered.Reconnect(bg, s.ID); err != nil {
 		t.Fatal(err)
 	}
 	waitState(t, recovered, s.ID, "ready")
@@ -480,38 +486,45 @@ func TestClaudeFinalSnapshotAndPermissionDenial(t *testing.T) {
 		t.Fatal("final message duplicated")
 	}
 }
-func TestLoopbackOriginBodyAndEventCursorGuards(t *testing.T) {
-	b, _ := testBroker(t, "claude")
-	mux := http.NewServeMux()
-	RegisterRoutes(mux, b, "/api/v1/agent-runtime")
-	req := func(method, path, origin, remote, body string) *httptest.ResponseRecorder {
-		r := httptest.NewRequest(method, "http://127.0.0.1:3200"+path, strings.NewReader(body))
-		r.RemoteAddr = remote
-		r.Header.Set("Origin", origin)
-		r.Header.Set("Content-Type", "application/json")
-		r.Header.Set("X-XGC-Agent-Client", "1")
+func TestBodyAndEventCursorGuards(t *testing.T) {
+	b, s := testBroker(t, "claude")
+	handler := Handler(b, HandlerOptions{})
+	req := func(method, path, contentType, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		if contentType != "" {
+			r.Header.Set("Content-Type", contentType)
+		}
 		w := httptest.NewRecorder()
-		mux.ServeHTTP(w, r)
+		handler.ServeHTTP(w, r)
 		return w
 	}
-	if w := req("GET", "/api/v1/agent-runtime/providers", "http://evil.example", "127.0.0.1:5", ""); w.Code != 403 {
-		t.Fatal("cross-origin read accepted")
-	}
-	if w := req("GET", "/api/v1/agent-runtime/providers", "", "10.0.0.1:5", ""); w.Code != 403 {
-		t.Fatal("remote accepted")
-	}
-	if w := req("POST", "/api/v1/agent-runtime/sessions", "http://127.0.0.1:3200", "127.0.0.1:5", `{"executable":"/bin/sh"}`); w.Code != 400 {
-		t.Fatal("arbitrary command input accepted")
-	}
-	r := httptest.NewRequest("GET", "http://localhost/events?after=3", nil)
-	r.Header.Set("Last-Event-ID", "7")
-	n, err := eventCursor(r)
-	if err != nil || n != 7 {
-		t.Fatal("reconnect cursor precedence")
-	}
-	r.Header.Set("Last-Event-ID", "-1")
-	if _, err = eventCursor(r); err == nil {
-		t.Fatal("invalid cursor")
+	for name, tc := range map[string]struct {
+		method, path, contentType, body string
+		status                          int
+		code                            string
+	}{
+		"arbitrary command input":  {"POST", "/sessions", "application/json", `{"executable":"/bin/sh"}`, 400, "invalid_argument"},
+		"form encoded body":        {"POST", "/sessions", "application/x-www-form-urlencoded", `profileId=claude`, 400, "invalid_argument"},
+		"trailing JSON":            {"POST", "/sessions/" + s.ID + "/cancel", "application/json", `{} {}`, 202, ""},
+		"unknown session":          {"GET", "/sessions/s_missing", "", "", 404, "not_found"},
+		"unknown route":            {"GET", "/sessions/" + s.ID + "/missing", "", "", 404, "not_found"},
+		"wrong method":             {"GET", "/sessions/" + s.ID + "/cancel", "", "", 405, "invalid_argument"},
+		"oversized page limit":     {"GET", "/sessions?limit=101", "", "", 400, "invalid_argument"},
+		"non numeric page limit":   {"GET", "/sessions?limit=many", "", "", 400, "invalid_argument"},
+		"events of a missing item": {"GET", "/sessions/s_missing/events", "", "", 404, "not_found"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := req(tc.method, tc.path, tc.contentType, tc.body)
+			if tc.code == "" {
+				return // a body-less route does not read its body
+			}
+			var envelope struct {
+				Error struct{ Code, Message string }
+			}
+			if w.Code != tc.status || json.Unmarshal(w.Body.Bytes(), &envelope) != nil || envelope.Error.Code != tc.code || envelope.Error.Message == "" {
+				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+		})
 	}
 }
 func TestMissingStorageBindingFailsClosed(t *testing.T) {
@@ -523,25 +536,22 @@ func TestMissingStorageBindingFailsClosed(t *testing.T) {
 		t.Fatal("retired schema accepted")
 	}
 }
-func TestSSEDisconnectDoesNotCancelWorker(t *testing.T) {
+func TestEventStreamDisconnectDoesNotCancelWorker(t *testing.T) {
 	b, s := testBroker(t, "cursor")
-	_, _ = b.Prompt(s.ID, "p1", "hello")
+	_, _ = b.Prompt(bg, s.ID, "p1", PromptRequest{Text: "hello"})
 	waitRequest(t, b, s.ID)
 	ctx, cancel := context.WithCancel(context.Background())
-	r := httptest.NewRequest("GET", "http://127.0.0.1:3200/api/v1/agent-runtime/sessions/"+s.ID+"/events?after=0", nil).WithContext(ctx)
-	r.RemoteAddr = "127.0.0.1:5"
-	mux := http.NewServeMux()
-	RegisterRoutes(mux, b, "/api/v1/agent-runtime")
+	r := httptest.NewRequest("GET", "/sessions/"+s.ID+"/events?after=0", nil).WithContext(ctx)
 	w := httptest.NewRecorder()
 	done := make(chan struct{})
-	go func() { mux.ServeHTTP(w, r); close(done) }()
+	go func() { Handler(b, HandlerOptions{}).ServeHTTP(w, r); close(done) }()
 	time.Sleep(20 * time.Millisecond)
 	cancel()
 	<-done
-	if !strings.Contains(w.Body.String(), "event: native-agent") {
-		t.Fatal("no real SSE frames")
+	if !strings.Contains(w.Body.String(), "event: event\n") || !strings.Contains(w.Body.String(), "id: 1\n") {
+		t.Fatalf("no real event frames: %q", w.Body.String())
 	}
-	snapshot, _ := b.Get(s.ID)
+	snapshot, _ := b.Get(bg, s.ID)
 	if snapshot.State != "awaiting-input" {
 		t.Fatalf("disconnect changed worker: %s", snapshot.State)
 	}
@@ -598,14 +608,14 @@ func TestShutdownCancelsPendingWorkspacePreparation(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("shutdown waited for handshake timeout")
 	}
-	final, _ := b.Get(s.ID)
+	final, _ := b.Get(bg, s.ID)
 	if final.State != "disconnected" {
 		t.Fatalf("state after shutdown: %s", final.State)
 	}
-	if _, err = b.Prompt(s.ID, "later", "must not start"); err == nil {
+	if _, err = b.Prompt(bg, s.ID, "later", PromptRequest{Text: "must not start"}); err == nil {
 		t.Fatal("accepted prompt after shutdown")
 	}
-	if err = b.Reconnect(s.ID); err == nil {
+	if err = b.Reconnect(bg, s.ID); err == nil {
 		t.Fatal("accepted reconnect after shutdown")
 	}
 }

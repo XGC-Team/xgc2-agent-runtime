@@ -137,7 +137,7 @@ func policyBroker(t *testing.T, request Request) (*Broker, Session, <-chan Answe
 		t.Fatal(err)
 	}
 	waitState(t, b, s.ID, "ready")
-	s, _ = b.Get(s.ID)
+	s, _ = b.Get(bg, s.ID)
 	return b, s, result
 }
 
@@ -148,14 +148,14 @@ func TestBrokerPolicyUsesDurableRequestsAndNormalDecisionAudit(t *testing.T) {
 			var reserved atomic.Int32
 			if err := b.SetDecisionEvaluator(func(ctx context.Context, input DecisionInput) (PolicyEvaluation, error) {
 				// Reentry would deadlock if the broker invoked policy under its locks.
-				if _, err := b.Get(input.Session.ID); err != nil {
+				if _, err := b.Get(bg, input.Session.ID); err != nil {
 					t.Error(err)
 				}
-				pending, err := b.Inputs(input.Session.ID)
+				pending, err := b.Inputs(bg, input.Session.ID)
 				if err != nil || len(pending) != 1 || pending[0].Request.ID != input.Request.ID {
 					t.Errorf("policy before durable request: %+v %v", pending, err)
 				}
-				events, _, err := b.Replay(input.Session.ID, 0)
+				events, _, err := b.replay(input.Session.ID, 0)
 				found := false
 				for _, event := range events {
 					found = found || event.Kind == "input.request" && event.ItemID == input.Request.ID
@@ -174,7 +174,7 @@ func TestBrokerPolicyUsesDurableRequestsAndNormalDecisionAudit(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := b.Prompt(s.ID, "turn", "please run"); err != nil {
+			if _, err := b.Prompt(bg, s.ID, "turn", PromptRequest{Text: "please run"}); err != nil {
 				t.Fatal(err)
 			}
 			select {
@@ -190,7 +190,7 @@ func TestBrokerPolicyUsesDurableRequestsAndNormalDecisionAudit(t *testing.T) {
 				t.Fatal("policy answer never reached provider")
 			}
 			waitState(t, b, s.ID, "ready")
-			events, _, _ := b.Replay(s.ID, 0)
+			events, _, _ := b.replay(s.ID, 0)
 			count := 0
 			for _, event := range events {
 				if event.Kind == "input.submitted" {
@@ -222,7 +222,7 @@ func TestBrokerManualDecisionWinsWhilePolicyIsPending(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Prompt(s.ID, "race", "please run"); err != nil {
+	if _, err := b.Prompt(bg, s.ID, "race", PromptRequest{Text: "please run"}); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -230,11 +230,11 @@ func TestBrokerManualDecisionWinsWhilePolicyIsPending(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("policy was not invoked")
 	}
-	pending, err := b.Inputs(s.ID)
+	pending, err := b.Inputs(bg, s.ID)
 	if err != nil || len(pending) != 1 {
 		t.Fatal("missing pending decision")
 	}
-	if err = b.AnswerContext(WithDecisionActor(context.Background(), DecisionActor{ID: "manual-operator"}), s.ID, pending[0].Request.ID, Answer{OptionID: "no"}); err != nil {
+	if err = b.Answer(WithDecisionActor(context.Background(), DecisionActor{ID: "manual-operator"}), s.ID, pending[0].Request.ID, Answer{OptionID: "no"}); err != nil {
 		t.Fatal(err)
 	}
 	close(release)
@@ -248,7 +248,7 @@ func TestBrokerManualDecisionWinsWhilePolicyIsPending(t *testing.T) {
 	}
 	waitState(t, b, s.ID, "ready")
 	b.Close()
-	events, _, _ := b.Replay(s.ID, 0)
+	events, _, _ := b.replay(s.ID, 0)
 	count := 0
 	for _, event := range events {
 		if event.Kind == "input.submitted" {
@@ -279,15 +279,15 @@ func TestBrokerPolicyCannotInventAnswersOrUnknownEffects(t *testing.T) {
 				calls.Add(1)
 				return PolicyEvaluation{Mode: DecisionAuto}, nil
 			})
-			if _, err := b.Prompt(s.ID, "manual-only", "please run"); err != nil {
+			if _, err := b.Prompt(bg, s.ID, "manual-only", PromptRequest{Text: "please run"}); err != nil {
 				t.Fatal(err)
 			}
 			waitState(t, b, s.ID, "awaiting-input")
-			pending, _ := b.Inputs(s.ID)
+			pending, _ := b.Inputs(bg, s.ID)
 			if calls.Load() != 0 {
 				t.Fatal("policy evaluated a user question, plan, or unknown effect")
 			}
-			if err := b.Answer(s.ID, pending[0].Request.ID, Answer{Cancel: true}); err != nil {
+			if err := b.Answer(bg, s.ID, pending[0].Request.ID, Answer{Cancel: true}); err != nil {
 				t.Fatal(err)
 			}
 			waitState(t, b, s.ID, "ready")
@@ -302,17 +302,17 @@ func TestBrokerPolicyCannotInventAnswersOrUnknownEffects(t *testing.T) {
 		now := time.Now().UTC()
 		return EvaluateDecisionPolicy(now, input.Facts, policyFixture(input.Facts, DecisionAuto, now)), nil
 	})
-	b.Prompt(s.ID, "no-public-once", "please run")
+	b.Prompt(bg, s.ID, "no-public-once", PromptRequest{Text: "please run"})
 	select {
 	case <-evaluated:
 	case <-time.After(time.Second):
 		t.Fatal("policy was not evaluated")
 	}
-	pending, _ := b.Inputs(s.ID)
+	pending, _ := b.Inputs(bg, s.ID)
 	if len(pending) != 1 || pending[0].Submitted {
 		t.Fatal("policy manufactured unsupported allow_once")
 	}
-	if err := b.Answer(s.ID, pending[0].Request.ID, Answer{Cancel: true}); err != nil {
+	if err := b.Answer(bg, s.ID, pending[0].Request.ID, Answer{Cancel: true}); err != nil {
 		t.Fatal(err)
 	}
 	waitState(t, b, s.ID, "ready")
@@ -325,17 +325,17 @@ func TestBrokerPolicyFailureLeavesManualRequestAvailable(t *testing.T) {
 		close(evaluated)
 		return PolicyEvaluation{}, errors.New("policy backend unavailable")
 	})
-	b.Prompt(s.ID, "policy-error", "please run")
+	b.Prompt(bg, s.ID, "policy-error", PromptRequest{Text: "please run"})
 	select {
 	case <-evaluated:
 	case <-time.After(time.Second):
 		t.Fatal("policy was not evaluated")
 	}
-	pending, _ := b.Inputs(s.ID)
+	pending, _ := b.Inputs(bg, s.ID)
 	if len(pending) != 1 || pending[0].Submitted {
 		t.Fatal("unavailable policy resolved the request")
 	}
-	b.Answer(s.ID, pending[0].Request.ID, Answer{Cancel: true})
+	b.Answer(bg, s.ID, pending[0].Request.ID, Answer{Cancel: true})
 	waitState(t, b, s.ID, "ready")
 }
 
@@ -364,11 +364,11 @@ func TestDecisionPolicyOrdinaryGCSHasExactEmptyConversationScope(t *testing.T) {
 
 func TestBrokerPolicyReevaluatesDurablePendingAndExposesCanonicalFacts(t *testing.T) {
 	b, s, answers := policyBroker(t, policyRequestFixture())
-	if _, err := b.Prompt(s.ID, "pending-then-policy", "please run"); err != nil {
+	if _, err := b.Prompt(bg, s.ID, "pending-then-policy", PromptRequest{Text: "please run"}); err != nil {
 		t.Fatal(err)
 	}
 	waitState(t, b, s.ID, "awaiting-input")
-	pending, err := b.Inputs(s.ID)
+	pending, err := b.Inputs(bg, s.ID)
 	if err != nil || len(pending) != 1 || pending[0].Facts == nil {
 		t.Fatalf("facts %+v %v", pending, err)
 	}
@@ -382,7 +382,7 @@ func TestBrokerPolicyReevaluatesDurablePendingAndExposesCanonicalFacts(t *testin
 		}
 		return EvaluateDecisionPolicy(time.Now(), input.Facts, policyFixture(facts, DecisionAuto, time.Now())), nil
 	})
-	if err := b.EvaluateInputs(s.ID); err != nil {
+	if err := b.EvaluateInputs(bg, s.ID); err != nil {
 		t.Fatal(err)
 	}
 	select {

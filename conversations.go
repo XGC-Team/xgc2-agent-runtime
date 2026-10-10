@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"sort"
 	"strings"
 	"unicode"
@@ -25,14 +24,14 @@ type MetadataUpdate struct {
 	Archived         *bool   `json:"archived,omitempty"`
 }
 
-func (b *Broker) UpdateMetadata(id string, update MetadataUpdate) (Session, error) {
+func (b *Broker) UpdateMetadata(_ context.Context, id string, update MetadataUpdate) (Session, error) {
 	if update.ExpectedRevision == 0 || (update.Title == nil && update.Archived == nil) {
-		return Session{}, errors.New("metadata revision and an explicit change are required")
+		return Session{}, invalid("metadata revision and an explicit change are required")
 	}
 	if update.Title != nil {
 		title := *update.Title
 		if !utf8.ValidString(title) || strings.TrimSpace(title) != title || utf8.RuneCountInString(title) > 160 || strings.ContainsFunc(title, unicode.IsControl) {
-			return Session{}, errors.New("conversation title must be at most 160 characters without control characters")
+			return Session{}, invalid("conversation title must be at most 160 characters without control characters")
 		}
 	}
 	s, err := b.get(id)
@@ -156,23 +155,23 @@ type sessionListCursor struct {
 	Context   ContextRef `json:"context"`
 }
 
-func (b *Broker) ListPage(options SessionListOptions) (SessionPage, error) {
+func (b *Broker) List(_ context.Context, options SessionListOptions) (SessionPage, error) {
 	if options.Limit == 0 {
 		options.Limit = 50
 	}
 	if options.Limit < 1 || options.Limit > 100 || ((options.Context.Kind == "") != (options.Context.ID == "")) ||
 		(options.Context.Kind != "" && (!safeID.MatchString(options.Context.Kind) || !safeID.MatchString(options.Context.ID))) {
-		return SessionPage{}, errors.New("invalid conversation list scope or limit")
+		return SessionPage{}, invalid("invalid conversation list scope or limit")
 	}
 	var cursor sessionListCursor
 	if options.After != "" {
 		data, err := base64.RawURLEncoding.DecodeString(options.After)
 		if err != nil || len(data) > 1024 || json.Unmarshal(data, &cursor) != nil || !safeID.MatchString(cursor.ID) || cursor.CreatedAt == "" || cursor.Context != options.Context {
-			return SessionPage{}, errors.New("invalid conversation list cursor")
+			return SessionPage{}, invalid("invalid conversation list cursor")
 		}
 	}
 	page := SessionPage{Sessions: []Session{}}
-	for _, session := range b.List() {
+	for _, session := range b.list() {
 		if options.Context.Kind != "" && session.Scope.Context != options.Context {
 			continue
 		}
@@ -196,7 +195,7 @@ type PendingRequest struct {
 	Facts     *DecisionFacts `json:"facts,omitempty"`
 }
 
-func (b *Broker) Inputs(id string) ([]PendingRequest, error) {
+func (b *Broker) Inputs(_ context.Context, id string) ([]PendingRequest, error) {
 	s, err := b.get(id)
 	if err != nil {
 		return nil, err
@@ -240,7 +239,7 @@ type AttentionSnapshot struct {
 	Revision string             `json:"revision"`
 }
 
-func (b *Broker) Attention() AttentionSnapshot {
+func (b *Broker) Attention(context.Context) (AttentionSnapshot, error) {
 	b.mu.Lock()
 	sessions := make([]*liveSession, 0, len(b.sessions))
 	for _, s := range b.sessions {
@@ -274,7 +273,7 @@ func (b *Broker) Attention() AttentionSnapshot {
 	sort.Slice(result.Sessions, func(i, j int) bool { return result.Sessions[i].SessionID < result.Sessions[j].SessionID })
 	data, _ := json.Marshal(result.Sessions)
 	result.Revision = hash(string(data))
-	return result
+	return result, nil
 }
 
 type DecisionActor struct {

@@ -31,18 +31,35 @@ type StorageBinding struct {
 	Scope      api.Scope
 	DatabaseID string
 	Schema     string
+	// JournalDelay bounds how long an event of the conversation journal waits
+	// for company before it is committed (default DefaultJournalDelay). Events
+	// that must be durable before they are acted on are committed at once.
+	JournalDelay time.Duration
 }
+
+// DefaultJournalDelay is the longest a streamed event waits for its commit, and
+// so the most a host crash can cost of a streaming turn.
+const DefaultJournalDelay = 200 * time.Millisecond
 
 // Store has no local persistence, implicit initialization or mutation retries.
 // Settings and conversations may use different granted scopes of this schema.
+// Its writes are serialized by one slot, so the scope revision a commit built on
+// is the one the last commit returned and no read is needed between commits.
 type Store struct {
 	StorageBinding
 	writer chan struct{}
+	// token is the scope revision after the last commit of this store. It is
+	// only used while holding the writer slot and dropped whenever a commit is
+	// not confirmed, so a stale value costs one rejected commit, never a lost update.
+	token *api.Token
 }
 
 func NewStore(binding StorageBinding) (*Store, error) {
-	if binding.Client == nil || binding.Scope.Namespace != StorageNamespace || binding.Scope.User == "" || binding.Scope.Workspace == "" || binding.DatabaseID == "" || binding.Schema != StorageSchema {
+	if binding.Client == nil || binding.Scope.Namespace != StorageNamespace || binding.Scope.User == "" || binding.Scope.Workspace == "" || binding.DatabaseID == "" || binding.Schema != StorageSchema || binding.JournalDelay < 0 {
 		return nil, errors.New("agent-runtime: explicit storage client, database, schema and owner scope required")
+	}
+	if binding.JournalDelay == 0 {
+		binding.JournalDelay = DefaultJournalDelay
 	}
 	return &Store{StorageBinding: binding, writer: make(chan struct{}, 1)}, nil
 }
@@ -106,7 +123,7 @@ func storageError(err error) error {
 	return err
 }
 
-func (s *Store) commit(ctx context.Context, token api.Token, mutations []api.Mutation) error {
+func (s *Store) commit(ctx context.Context, token api.Token, mutations []api.Mutation) (api.Receipt, error) {
 	ctx, cancel := context.WithTimeout(ctx, storageCallTimeout)
 	defer cancel()
 	id := "ar-write-" + randomID()
@@ -121,21 +138,21 @@ func (s *Store) commit(ctx context.Context, token api.Token, mutations []api.Mut
 			var lookup error
 			receipt, lookup = s.Client.Receipt(recovery, "ar-receipt-"+randomID(), api.ReceiptRequest{Scope: s.Scope, RequestID: id})
 			if lookup != nil {
-				return fmt.Errorf("agent-runtime: unresolved storage request %s: %w", id, err)
+				return api.Receipt{}, fmt.Errorf("agent-runtime: unresolved storage request %s: %w", id, err)
 			}
 		} else {
-			return storageError(err)
+			return api.Receipt{}, storageError(err)
 		}
 	}
 	if receipt.RequestID != id || receipt.Token.DatabaseID != s.DatabaseID || receipt.Token.Schema != s.Schema || !revision(receipt.Token.Revision) || !nextRevision(token.Revision, receipt.Token.Revision) || receipt.Durability != "sqlite-full" || !digest.MatchString(receipt.Digest) || len(receipt.Versions) != len(mutations) {
-		return errors.New("agent-runtime: invalid durable storage receipt")
+		return api.Receipt{}, errors.New("agent-runtime: invalid durable storage receipt")
 	}
 	for i, record := range receipt.Versions {
 		if record.Collection != mutations[i].Collection || record.Key != mutations[i].Key || record.Version != receipt.Token.Revision || record.Deleted != mutations[i].Delete || record.Missing {
-			return errors.New("agent-runtime: incomplete durable storage receipt")
+			return api.Receipt{}, errors.New("agent-runtime: incomplete durable storage receipt")
 		}
 	}
-	return nil
+	return receipt, nil
 }
 
 type sessionRecord struct {
@@ -149,63 +166,99 @@ type sessionRecord struct {
 
 func eventKey(id string, seq uint64) string { return fmt.Sprintf("%s.%012d", id, seq) }
 
-func (s *Store) create(ctx context.Context, record sessionRecord) error {
+// create writes the record of a new conversation and returns its version.
+func (s *Store) create(ctx context.Context, record sessionRecord) (string, error) {
 	ctx, release, err := s.begin(ctx)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer release()
+	s.token = nil
 	read, err := s.snapshot(ctx, []api.Query{{Collection: "sessions", Keys: []string{record.ID}}}, nil)
 	if err != nil {
-		return err
+		return "", err
 	}
 	prior := read.Results[0].Records[0]
 	if !prior.Missing {
-		return ErrConflict
+		return "", ErrConflict
 	}
 	raw, err := json.Marshal(record)
 	if err != nil {
-		return err
+		return "", err
 	}
-	return s.commit(ctx, read.Token, []api.Mutation{{Collection: "sessions", Key: record.ID, ExpectedVersion: prior.Version, Data: raw}})
+	receipt, err := s.commit(ctx, read.Token, []api.Mutation{{Collection: "sessions", Key: record.ID, ExpectedVersion: prior.Version, Data: raw}})
+	if err != nil {
+		return "", err
+	}
+	s.token = &receipt.Token
+	return receipt.Token.Revision, nil
 }
 
-func (s *Store) append(record sessionRecord, previous uint64, event Event) error {
-	ctx, release, err := s.begin(context.Background())
+// commitEvents writes consecutive events of one conversation, the record they
+// leave behind and the identities of the prompts among them in a single atomic
+// batch, and returns the new version of the record. The record is the
+// compare-and-swap anchor: if another host appended to the conversation the
+// batch is rejected and nothing is written. The scope revision comes from the
+// previous commit of this store; when another writer moved it the commit is
+// rejected once, the conversation is checked to be exactly as this host left
+// it, and the batch is built again on the new revision.
+func (s *Store) commitEvents(ctx context.Context, id, version string, batch []pendingEvent) (string, error) {
+	ctx, release, err := s.begin(ctx)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer release()
-	read, err := s.snapshot(ctx, []api.Query{{Collection: "sessions", Keys: []string{record.ID}}}, nil)
+	record, err := json.Marshal(batch[len(batch)-1].record)
 	if err != nil {
-		return err
+		return "", err
 	}
-	prior := read.Results[0].Records[0]
-	var before sessionRecord
-	if prior.Missing || prior.Deleted || json.Unmarshal(prior.Data, &before) != nil || before.ID != record.ID || before.LastSeq != previous || before.RuntimeID != record.RuntimeID && event.Kind != "session.runtime" {
-		return ErrConflict
+	mutations := []api.Mutation{{Collection: "sessions", Key: id, ExpectedVersion: version, Data: record}}
+	for _, p := range batch {
+		mutations = append(mutations, api.Mutation{Collection: "events", Key: eventKey(id, p.event.Seq), ExpectedVersion: "0", Data: p.data})
+		if p.event.Kind == "item.snapshot" && p.event.Role == "user" && p.event.Status == "submitted" {
+			prompt, _ := json.Marshal(struct {
+				SessionID   string `json:"sessionId"`
+				Fingerprint string `json:"fingerprint"`
+			}{id, promptFingerprint(p.event.Text, optionsFromDetails(p.event.Details))})
+			mutations = append(mutations, api.Mutation{Collection: "prompts", Key: p.event.TurnID, ExpectedVersion: "0", Data: prompt})
+		}
 	}
-	meta, err := json.Marshal(record)
-	if err != nil {
-		return err
+	for attempt := 0; ; attempt++ {
+		if s.token == nil {
+			read, err := s.snapshot(ctx, []api.Query{{Collection: "sessions", Keys: []string{id}}}, nil)
+			if err != nil {
+				return "", err
+			}
+			s.token = &read.Token
+		}
+		receipt, err := s.commit(ctx, *s.token, mutations)
+		if err == nil {
+			s.token = &receipt.Token
+			return receipt.Token.Revision, nil
+		}
+		s.token = nil
+		if attempt > 0 || !errors.Is(err, ErrConflict) {
+			return "", err
+		}
+		read, rerr := s.snapshot(ctx, []api.Query{{Collection: "sessions", Keys: []string{id}}}, nil)
+		if rerr != nil {
+			return "", err
+		}
+		if row := read.Results[0].Records[0]; row.Missing || row.Deleted || row.Version != version {
+			return "", err
+		}
+		s.token = &read.Token
 	}
-	raw, err := json.Marshal(event)
-	if err != nil {
-		return err
-	}
-	mutations := []api.Mutation{{Collection: "sessions", Key: record.ID, ExpectedVersion: prior.Version, Data: meta}, {Collection: "events", Key: eventKey(record.ID, event.Seq), ExpectedVersion: "0", Data: raw}}
-	if event.Kind == "item.snapshot" && event.Role == "user" && event.Status == "submitted" {
-		prompt, _ := json.Marshal(struct {
-			SessionID   string `json:"sessionId"`
-			Fingerprint string `json:"fingerprint"`
-		}{record.ID, promptFingerprint(event.Text, optionsFromDetails(event.Details))})
-		mutations = append(mutations, api.Mutation{Collection: "prompts", Key: event.TurnID, ExpectedVersion: "0", Data: prompt})
-	}
-	return s.commit(ctx, read.Token, mutations)
 }
 
-func (s *Store) records(ctx context.Context) ([]sessionRecord, error) {
-	result := []sessionRecord{}
+// persistedSession is a stored conversation record and the version it has.
+type persistedSession struct {
+	sessionRecord
+	version string
+}
+
+func (s *Store) records(ctx context.Context) ([]persistedSession, error) {
+	result := []persistedSession{}
 	var at *api.Token
 	after := ""
 	for {
@@ -225,7 +278,7 @@ func (s *Store) records(ctx context.Context) ([]sessionRecord, error) {
 			if _, err := commandArgs(record.Provider); err != nil {
 				return nil, err
 			}
-			result = append(result, record)
+			result = append(result, persistedSession{record, row.Version})
 			if len(result) > MaxRetainedSessions {
 				return nil, errors.New("agent-runtime: retained conversation quota exceeded")
 			}
@@ -345,5 +398,10 @@ func (s *Store) saveProfiles(ctx context.Context, expected string, profiles []Pr
 	if len(raw) > 64<<10 {
 		return errors.New("agent-runtime: provider configuration exceeds capacity")
 	}
-	return s.commit(ctx, read.Token, []api.Mutation{{Collection: "settings", Key: "providers", ExpectedVersion: expected, Data: raw}})
+	s.token = nil
+	receipt, err := s.commit(ctx, read.Token, []api.Mutation{{Collection: "settings", Key: "providers", ExpectedVersion: expected, Data: raw}})
+	if err == nil {
+		s.token = &receipt.Token
+	}
+	return err
 }

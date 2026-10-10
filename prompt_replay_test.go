@@ -61,18 +61,18 @@ func TestPersistedPromptOptionsReplayKeepsJournalAndIdempotency(t *testing.T) {
 		profile := testProfile(t, "codex")
 		live := newSession(Session{SchemaVersion: Schema, ID: id, Scope: scope("codex"), Provider: "codex", State: "starting", CreatedAt: events[0].CreatedAt, MetadataRevision: 1}, store)
 		live.profile = profile
-		if err := store.create(context.Background(), live.record()); err != nil {
+		version, err := store.create(context.Background(), live.record())
+		if err != nil {
 			t.Fatal(err)
 		}
+		live.version = version
 		for _, event := range events {
 			if err := live.appendLocked(event); err != nil {
 				t.Fatal(err)
 			}
 		}
-		events, err := live.readEventsLocked(0, live.info.LastSeq)
-		if err != nil {
-			t.Fatal(err)
-		}
+		commit(t, live)
+		events = stored(t, live, 0, live.info.LastSeq)
 		broker, err := NewBroker(store, nil,
 			func(context.Context, Create, string, bool) (string, error) {
 				t.Error("journal replay must not prepare a workspace")

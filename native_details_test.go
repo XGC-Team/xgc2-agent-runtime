@@ -94,10 +94,8 @@ func TestNativeEventTimeIsPersistedReceiptTime(t *testing.T) {
 	if err := session.appendLocked(Event{Kind: "notice", Text: "fixture", CreatedAt: "2000-01-01T00:00:00Z"}); err != nil {
 		t.Fatal(err)
 	}
-	events, err := session.readEventsLocked(0, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	commit(t, session)
+	events := stored(t, session, 0, 1)
 	receipt, err := time.Parse(time.RFC3339Nano, events[0].CreatedAt)
 	if err != nil || receipt.Before(start) || receipt.After(time.Now().UTC()) {
 		t.Fatalf("receipt=%v err=%v", receipt, err)

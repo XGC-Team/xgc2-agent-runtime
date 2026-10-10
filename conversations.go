@@ -65,11 +65,15 @@ func (b *Broker) UpdateMetadata(_ context.Context, id string, update MetadataUpd
 	if err == nil && metadata.Archived {
 		finish, err = s.retireRuntimeLocked()
 	}
-	info := s.info
+	info, seq := s.info, s.info.LastSeq
 	s.releaseHistoryLocked()
 	s.mu.Unlock()
 	finish()
-	return info, err
+	if err != nil {
+		return info, err
+	}
+	// The change is acknowledged once it is on disk.
+	return info, s.waitDurable(context.Background(), seq)
 }
 
 // Caller holds s.mu. Runtime teardown is fenced until Close has completed, so
@@ -119,7 +123,7 @@ func (s *liveSession) releaseHistoryLocked() {
 			return
 		}
 	}
-	s.turns = map[string]string{}
+	s.turns = map[string]turnRecord{}
 	s.inputs = map[string]*pendingInput{}
 }
 

@@ -17,7 +17,10 @@ import (
 	unixlease "github.com/XGC-Team/xgc2-xrpc/go/unix"
 )
 
-func testStorage(t *testing.T) *Store {
+func testStorage(t *testing.T) *Store { return testStorageDelay(t, 0) }
+
+// testStorageDelay is testStorage with the given journal delay (zero: the default).
+func testStorageDelay(t *testing.T, delay time.Duration) *Store {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "sol21-storage-")
 	if err != nil {
@@ -77,20 +80,43 @@ func testStorage(t *testing.T) *Store {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := NewStore(StorageBinding{Client: consumer, Scope: scope, DatabaseID: read.Token.DatabaseID, Schema: StorageSchema})
+	store, err := NewStore(StorageBinding{Client: consumer, Scope: scope, DatabaseID: read.Token.DatabaseID, Schema: StorageSchema, JournalDelay: delay})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return store
 }
 
-func testSession(t *testing.T, id string) *liveSession {
+func testSession(t *testing.T, id string) *liveSession { return testSessionDelay(t, id, 0) }
+
+func testSessionDelay(t *testing.T, id string, delay time.Duration) *liveSession {
 	t.Helper()
-	store := testStorage(t)
+	store := testStorageDelay(t, delay)
 	s := newSession(Session{SchemaVersion: Schema, ID: id, Provider: "codex", Scope: scope("codex"), MetadataRevision: 1}, store)
 	s.profile = testProfile(t, "codex")
-	if err := store.create(context.Background(), s.record()); err != nil {
+	version, err := store.create(context.Background(), s.record())
+	if err != nil {
 		t.Fatal(err)
 	}
+	s.version = version
 	return s
+}
+
+// commit makes everything the session appended so far durable, the way a
+// command that is acknowledged only once its events are on disk does.
+func commit(t testing.TB, s *liveSession) {
+	t.Helper()
+	if err := s.flushAll(bg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// stored reads events straight from storage, bypassing the journal's pending list.
+func stored(t testing.TB, s *liveSession, after, end uint64) []Event {
+	t.Helper()
+	events, err := s.store.readEvents(s.id, after, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return events
 }

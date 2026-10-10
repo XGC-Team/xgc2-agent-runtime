@@ -44,6 +44,10 @@ func (d *conversationDriver) Cancel(context.Context, string) error { return nil 
 func (d *conversationDriver) Close() error                         { d.closed.Store(true); return nil }
 
 func conversationBroker(t *testing.T, firstOpenFails bool) (*Broker, Profile, Factory) {
+	return conversationBrokerOn(t, firstOpenFails, testStorage(t))
+}
+
+func conversationBrokerOn(t *testing.T, firstOpenFails bool, store *Store) (*Broker, Profile, Factory) {
 	t.Helper()
 	root := t.TempDir()
 	program := []byte("fixture: never execute\n")
@@ -57,7 +61,7 @@ func conversationBroker(t *testing.T, firstOpenFails bool) (*Broker, Profile, Fa
 	factory := func(_ Profile, sink Sink, ask Ask) (Driver, error) {
 		return &conversationDriver{sink: sink, ask: ask, fail: firstOpenFails && builds.Add(1) == 1}, nil
 	}
-	b, err := NewBroker(testStorage(t), []Profile{profile}, func(context.Context, Create, string, bool) (string, error) { return root, nil }, factory)
+	b, err := NewBroker(store, []Profile{profile}, func(context.Context, Create, string, bool) (string, error) { return root, nil }, factory)
 	if err != nil {
 		t.Fatal(err)
 	}

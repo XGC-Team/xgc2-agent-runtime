@@ -40,8 +40,8 @@ func (d *conversationDriver) Prompt(ctx context.Context, turn, prompt string) er
 	}
 	return d.sink(Event{Kind: "turn.end", TurnID: turn, Status: "completed"})
 }
-func (d *conversationDriver) Cancel(context.Context) error { return nil }
-func (d *conversationDriver) Close() error                 { d.closed.Store(true); return nil }
+func (d *conversationDriver) Cancel(context.Context, string) error { return nil }
+func (d *conversationDriver) Close() error                         { d.closed.Store(true); return nil }
 
 func conversationBroker(t *testing.T, firstOpenFails bool) (*Broker, Profile, Factory) {
 	t.Helper()

@@ -46,8 +46,8 @@ func (d *scopedFixtureDriver) Open(_ context.Context, _ string, native string) e
 func (d *scopedFixtureDriver) Prompt(context.Context, string, string) error {
 	return errors.New("unexpected prompt replay")
 }
-func (d *scopedFixtureDriver) Cancel(context.Context) error { return nil }
-func (d *scopedFixtureDriver) Close() error                 { d.once.Do(func() { close(d.closed) }); return nil }
+func (d *scopedFixtureDriver) Cancel(context.Context, string) error { return nil }
+func (d *scopedFixtureDriver) Close() error                         { d.once.Do(func() { close(d.closed) }); return nil }
 func scopeProfile(t *testing.T) Profile {
 	t.Helper()
 	executable, err := os.Executable()

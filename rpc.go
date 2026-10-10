@@ -75,6 +75,17 @@ func (p *rpcPeer) send(w wire) error {
 	return json.NewEncoder(p.input).Encode(w)
 }
 func (p *rpcPeer) Call(ctx context.Context, method string, params map[string]any) (map[string]any, error) {
+	wait, err := p.start(ctx, method, params)
+	if err != nil {
+		return nil, err
+	}
+	return wait()
+}
+
+// start writes a request and returns the function that waits for its response.
+// A caller that must act once the request is on the wire, and not before, uses
+// it instead of Call.
+func (p *rpcPeer) start(ctx context.Context, method string, params map[string]any) (func() (map[string]any, error), error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -87,25 +98,29 @@ func (p *rpcPeer) Call(ctx context.Context, method string, params map[string]any
 	ch := make(chan wire, 1)
 	p.pending[id] = ch
 	p.mu.Unlock()
-	defer func() { p.mu.Lock(); delete(p.pending, id); p.mu.Unlock() }()
+	forget := func() { p.mu.Lock(); delete(p.pending, id); p.mu.Unlock() }
 	if err := p.send(wire{ID: json.RawMessage(id), Method: method, Params: params}); err != nil {
+		forget()
 		return nil, err
 	}
-	select {
-	case w := <-ch:
-		if w.Error != nil {
-			return nil, protocolError(w.Error.Code)
+	return func() (map[string]any, error) {
+		defer forget()
+		select {
+		case w := <-ch:
+			if w.Error != nil {
+				return nil, protocolError(w.Error.Code)
+			}
+			var result map[string]any
+			if len(w.Result) == 0 || json.Unmarshal(w.Result, &result) != nil || result == nil {
+				return nil, errors.New("invalid RPC response")
+			}
+			return result, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-p.done:
+			return nil, io.EOF
 		}
-		var result map[string]any
-		if len(w.Result) == 0 || json.Unmarshal(w.Result, &result) != nil || result == nil {
-			return nil, errors.New("invalid RPC response")
-		}
-		return result, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-p.done:
-		return nil, io.EOF
-	}
+	}, nil
 }
 func (p *rpcPeer) Notify(method string, params map[string]any) error {
 	return p.send(wire{Method: method, Params: params})

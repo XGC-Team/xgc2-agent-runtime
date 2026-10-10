@@ -271,6 +271,9 @@ func (d *claudeDriver) promptWithControl(ctx context.Context, turn, prompt strin
 	if native != "" {
 		args = append(args, "--resume="+native)
 	}
+	if d.stopRequested(turn) {
+		return d.stoppedBeforeStart(turn)
+	}
 	args, environment, cleanup, err := claudeLocalMCPLaunch(ctx, args)
 	if err != nil {
 		return err
@@ -283,8 +286,11 @@ func (d *claudeDriver) promptWithControl(ctx context.Context, turn, prompt strin
 	defer func() { _ = child.stdout.Close(); child.Stop(); _ = child.Wait() }()
 	d.mu.Lock()
 	d.process = child
-	d.cancelled = false
+	stopped := d.stop == turn
 	d.mu.Unlock()
+	if stopped {
+		go child.Stop()
+	}
 	stop := context.AfterFunc(ctx, func() { child.Stop() })
 	defer stop()
 	controlCtx, cancel := context.WithCancel(ctx)
@@ -349,7 +355,7 @@ func (d *claudeDriver) promptWithControl(ctx context.Context, turn, prompt strin
 	waitErr := child.Wait()
 	d.mu.Lock()
 	d.process = nil
-	cancelled := d.cancelled
+	cancelled := d.stop == turn
 	if decoder.native != "" {
 		d.nativeSession = decoder.native
 	}

@@ -303,10 +303,19 @@ type Session struct {
 }
 type Sink func(Event) error
 type Ask func(context.Context, Request) (Answer, error)
+
+// Driver speaks one native client's protocol. Open starts or resumes the native
+// session; Prompt runs one turn and returns after the turn's terminal event.
+//
+// Cancel asks the native client to stop the named turn and returns once the
+// request is accepted: a turn the client has not acknowledged yet, or that
+// Prompt has not started, is stopped as soon as it starts, so a Stop is never
+// lost to that race. An error means the stop was not accepted and the turn
+// keeps running. A turn that is not current is ErrStale.
 type Driver interface {
 	Open(context.Context, string, string) error
 	Prompt(context.Context, string, string) error
-	Cancel(context.Context) error
+	Cancel(context.Context, string) error
 	Close() error
 }
 type Factory func(Profile, Sink, Ask) (Driver, error)

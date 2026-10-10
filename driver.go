@@ -43,6 +43,12 @@ type rpcDriver struct {
 	acpSetup         map[string]any
 	cwd              string
 	launchPermission string
+	// stop is the turn the operator asked to stop. It is remembered until the
+	// native client can take it (the native turn is acknowledged, the ACP prompt
+	// is on the wire) and delivered once: stopSent is the turn it went out for.
+	stop       string
+	stopSent   string
+	promptSent bool
 }
 
 func (d *rpcDriver) emit(e Event) {
@@ -233,15 +239,38 @@ func (d *rpcDriver) PromptWithOptions(ctx context.Context, turn, prompt string, 
 	d.messageSerial = 0
 	d.messageID = ""
 	d.messageRole = ""
+	d.promptSent = false
 	native := d.nativeSession
 	done := d.turnDone
 	d.mu.Unlock()
-	defer func() { d.mu.Lock(); d.turnContext = nil; d.turn = ""; d.nativeTurn = ""; d.mu.Unlock() }()
+	defer func() {
+		d.mu.Lock()
+		d.turnContext = nil
+		d.turn = ""
+		d.nativeTurn = ""
+		d.promptSent = false
+		d.mu.Unlock()
+	}()
+	if d.stopRequested(turn) {
+		return d.stoppedBeforeStart()
+	}
 	if d.profile.Provider != "codex" {
 		if err := d.applyACPOptions(ctx, options); err != nil {
 			return err
 		}
-		result, err := d.peer.Call(ctx, "session/prompt", map[string]any{"sessionId": native, "prompt": localMCPACPContent(ctx, prompt)})
+		if d.stopRequested(turn) {
+			return d.stoppedBeforeStart()
+		}
+		wait, err := d.peer.start(ctx, "session/prompt", map[string]any{"sessionId": native, "prompt": localMCPACPContent(ctx, prompt)})
+		if err != nil {
+			return err
+		}
+		// A stop that came while the prompt was being written would have reached
+		// the client before it: send it now that the prompt is on the wire.
+		if err = d.deliverStop(ctx, turn, true); err != nil {
+			d.emit(Event{Kind: "notice", Status: "error", Text: stopNotDelivered})
+		}
+		result, err := wait()
 		if err != nil {
 			return err
 		}
@@ -278,6 +307,10 @@ func (d *rpcDriver) PromptWithOptions(ctx context.Context, turn, prompt string, 
 	if !same {
 		return errors.New("turn identity mismatch")
 	}
+	// A stop that came before the native turn was acknowledged is applied now.
+	if err = d.deliverStop(ctx, turn, false); err != nil {
+		d.emit(Event{Kind: "notice", Status: "error", Text: stopNotDelivered})
+	}
 	for {
 		select {
 		case terminal := <-done:
@@ -293,18 +326,60 @@ func (d *rpcDriver) PromptWithOptions(ctx context.Context, turn, prompt string, 
 		}
 	}
 }
-func (d *rpcDriver) Cancel(ctx context.Context) error {
+
+const stopNotDelivered = "The stop request could not be delivered to the client."
+
+// Cancel records the stop and delivers it when the native client can take it:
+// at once for a running turn, otherwise when the turn starts.
+func (d *rpcDriver) Cancel(ctx context.Context, turn string) error {
 	d.mu.Lock()
-	native, turn := d.nativeSession, d.nativeTurn
+	d.stop = turn
+	peer := d.peer
 	d.mu.Unlock()
-	if d.peer == nil {
+	if peer == nil {
 		return ErrUnavailable
 	}
+	return d.deliverStop(ctx, turn, false)
+}
+
+func (d *rpcDriver) stopRequested(turn string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.stop == turn
+}
+
+// stoppedBeforeStart ends a turn the operator stopped before it reached the
+// native client; nothing was sent, so nothing needs to be interrupted.
+func (d *rpcDriver) stoppedBeforeStart() error {
+	d.emit(Event{Kind: "turn.end", Status: "cancelled", SourceMethod: "stop"})
+	return nil
+}
+
+// deliverStop sends the remembered stop of turn to the native client, once.
+// Codex interrupts the native turn, which exists only after turn/started or the
+// turn/start result; ACP cancels the session, which only means something while
+// its prompt is on the wire. ACP's prompt marks that moment with sent.
+func (d *rpcDriver) deliverStop(ctx context.Context, turn string, sent bool) error {
+	d.mu.Lock()
+	if sent {
+		d.promptSent = true
+	}
+	due := d.stop == turn && d.stopSent != turn && d.turn == turn
 	if d.profile.Provider == "codex" {
-		if turn == "" {
-			return errors.New("turn not yet acknowledged; close the session to stop the worker")
-		}
-		_, err := d.peer.Call(ctx, "turn/interrupt", map[string]any{"threadId": native, "turnId": turn})
+		due = due && d.nativeTurn != ""
+	} else {
+		due = due && d.promptSent
+	}
+	if due {
+		d.stopSent = turn
+	}
+	native, nativeTurn := d.nativeSession, d.nativeTurn
+	d.mu.Unlock()
+	if !due {
+		return nil
+	}
+	if d.profile.Provider == "codex" {
+		_, err := d.peer.Call(ctx, "turn/interrupt", map[string]any{"threadId": native, "turnId": nativeTurn})
 		return err
 	}
 	return d.peer.Notify("session/cancel", map[string]any{"sessionId": native})
@@ -374,7 +449,16 @@ func (d *rpcDriver) codexEvent(method string, p map[string]any) {
 	case "turn/started":
 		d.mu.Lock()
 		d.nativeTurn = text(obj(p["turn"]), "id")
+		turn, turnContext := d.turn, d.turnContext
 		d.mu.Unlock()
+		if turnContext != nil && d.stopRequested(turn) {
+			// The read loop must not wait for the response of its own request.
+			go func() {
+				if d.deliverStop(turnContext, turn, false) != nil {
+					d.emit(Event{Kind: "notice", Status: "error", Text: stopNotDelivered})
+				}
+			}()
+		}
 		return
 	case "turn/completed":
 		t := obj(p["turn"])

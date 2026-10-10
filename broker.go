@@ -43,6 +43,7 @@ type liveSession struct {
 	driver              Driver
 	cwd                 string
 	current             string
+	stopped             string
 	cancel              context.CancelFunc
 	ended               bool
 	lastTurnStatus      string
@@ -345,7 +346,15 @@ func (b *Broker) connect(binding context.Context, s *liveSession, p Profile, fre
 	if old != nil {
 		_ = old.Close()
 	}
-	defer func() { s.mu.Lock(); s.opening = nil; s.releaseHistoryLocked(); s.mu.Unlock() }()
+	attempted := false
+	defer func() {
+		if !attempted {
+			s.mu.Lock()
+			s.opening = nil
+			s.releaseHistoryLocked()
+			s.mu.Unlock()
+		}
+	}()
 	cwd, err := b.prepare(ctx, scope, id, fresh)
 	if err == nil {
 		err = ctx.Err()
@@ -379,6 +388,12 @@ func (b *Broker) connect(binding context.Context, s *liveSession, p Profile, fre
 		err = s.appendLocked(Event{Kind: "session.state", Status: "ready"})
 	}
 	closed := s.stopping || s.info.State == "closed"
+	// The attempt is over before its outcome is visible: a caller that sees the
+	// session ready can reconnect, close or prompt it at once, and a newer attempt
+	// is never mistaken for this one.
+	attempted = true
+	s.opening = nil
+	s.releaseHistoryLocked()
 	s.mu.Unlock()
 	if (err != nil || closed) && driver != nil {
 		_ = driver.Close()
@@ -565,10 +580,11 @@ func (b *Broker) startPromptLocked(s *liveSession, turn, prompt string, options,
 				p.cancel()
 			}
 		}
-		if err != nil || !ended || s.lastTurnStatus != "completed" {
+		if err != nil || !ended || s.lastTurnStatus != "completed" || s.stopped == turn {
 			s.pauseQueueLocked()
 		}
 		s.current = ""
+		s.stopped = ""
 		s.cancel = nil
 		if !s.stopping && s.info.State != "closed" {
 			state := "ready"
@@ -698,28 +714,40 @@ func (b *Broker) Answer(ctx context.Context, id, requestID string, a Answer) err
 	p.value <- a
 	return nil
 }
+
+// Cancel is the operator's Stop. It holds the queued messages first: a stop is
+// a decision about what runs next, and the held queue stays held when the turn
+// ends however it ends. The turn enters cancelling only after the native client
+// accepted the stop, so a stop that failed leaves its approvals answerable and
+// the turn running; only native acknowledgement or exit finishes the turn.
 func (b *Broker) Cancel(ctx context.Context, id string) error {
 	s, err := b.get(id)
 	if err != nil {
 		return err
 	}
 	s.mu.Lock()
-	if s.stopping || s.current == "" || s.driver == nil {
+	if s.stopping || s.current == "" || s.ended || s.driver == nil {
 		s.mu.Unlock()
 		return ErrStale
 	}
-	driver := s.driver
+	turn, driver := s.current, s.driver
+	s.stopped = turn
+	s.pauseQueueLocked()
+	s.mu.Unlock()
+	if err = driver.Cancel(ctx, turn); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.current != turn || s.ended || s.stopping || s.info.State == "cancelling" {
+		return nil // the turn ended on its own while the stop was delivered
+	}
 	for _, p := range s.inputs {
 		if p.active {
 			p.cancel()
 		}
 	}
-	err = s.appendLocked(Event{Kind: "session.state", Status: "cancelling"})
-	s.mu.Unlock()
-	if err != nil {
-		return err
-	}
-	return driver.Cancel(ctx) // Only native acknowledgement/exit can finish the turn.
+	return s.appendLocked(Event{Kind: "session.state", Status: "cancelling"})
 }
 
 // Reconnect carries the ephemeral composition values of ctx into the explicit

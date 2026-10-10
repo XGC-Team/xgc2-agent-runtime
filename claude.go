@@ -20,7 +20,9 @@ type claudeDriver struct {
 	process       *child
 	cwd           string
 	nativeSession string
-	cancelled     bool
+	// stop is the turn the operator asked to stop, remembered until that
+	// turn's process exists and is stopped.
+	stop string
 }
 
 func (d *claudeDriver) Open(ctx context.Context, cwd, nativeID string) error {
@@ -47,14 +49,20 @@ func (d *claudeDriver) Prompt(ctx context.Context, turn, prompt string) error {
 	if native != "" {
 		args = append(args, "--resume="+native)
 	}
+	if d.stopRequested(turn) {
+		return d.stoppedBeforeStart(turn)
+	}
 	c, err := startChild(ctx, d.profile, args, cwd)
 	if err != nil {
 		return err
 	}
 	d.mu.Lock()
 	d.process = c
-	d.cancelled = false
+	stopped := d.stop == turn
 	d.mu.Unlock()
+	if stopped {
+		go c.Stop()
+	}
 	stop := context.AfterFunc(ctx, func() { c.Stop() })
 	defer stop()
 	// Prompt bytes go through stdin, never the process list.
@@ -82,7 +90,7 @@ func (d *claudeDriver) Prompt(ctx context.Context, turn, prompt string) error {
 	waitErr := c.Wait()
 	d.mu.Lock()
 	d.process = nil
-	cancelled := d.cancelled
+	cancelled := d.stop == turn
 	if decoder.native != "" {
 		d.nativeSession = decoder.native
 	}
@@ -104,16 +112,30 @@ func (d *claudeDriver) Prompt(ctx context.Context, turn, prompt string) error {
 	}
 	return d.sink(Event{Kind: "turn.end", TurnID: turn, Status: decoder.status, SourceMethod: "claude:result"})
 }
-func (d *claudeDriver) Cancel(ctx context.Context) error {
+
+// Cancel stops the turn's process, or remembers the stop for a turn whose
+// process does not exist yet: Prompt then ends the turn without launching it.
+func (d *claudeDriver) Cancel(_ context.Context, turn string) error {
 	d.mu.Lock()
-	d.cancelled = true
+	d.stop = turn
 	p := d.process
 	d.mu.Unlock()
-	if p == nil {
-		return ErrStale
+	if p != nil {
+		go p.Stop()
 	}
-	go p.Stop()
 	return nil
+}
+
+func (d *claudeDriver) stopRequested(turn string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.stop == turn
+}
+
+// stoppedBeforeStart ends a turn the operator stopped before its process
+// started: nothing was sent to the client.
+func (d *claudeDriver) stoppedBeforeStart(turn string) error {
+	return d.sink(Event{Kind: "turn.end", TurnID: turn, Status: "cancelled", SourceMethod: "claude:stop"})
 }
 func (d *claudeDriver) Close() error {
 	d.mu.Lock()

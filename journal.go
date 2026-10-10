@@ -114,11 +114,23 @@ func (s *liveSession) broadcastLocked() {
 	s.changed = make(chan struct{})
 }
 
-// stopLocked ends the conversation's ability to take events. Subscribers read
-// what is pending and then see the failure.
+// stopLocked ends the conversation's ability to take events and stops its
+// worker, which could no longer be recorded. Subscribers read what is pending
+// and then see the failure.
 func (s *liveSession) stopLocked(cause error) error {
 	s.storageErr = errors.Join(errors.New("event persistence failed; session stopped"), cause)
 	s.info.State = "disconnected"
+	for _, p := range s.inputs {
+		if p.active {
+			p.cancel()
+		}
+	}
+	if s.cancel != nil {
+		s.cancel()
+	}
+	if driver := s.driver; driver != nil {
+		go func() { _ = driver.Close() }()
+	}
 	s.broadcastLocked()
 	return s.storageErr
 }

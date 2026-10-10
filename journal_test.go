@@ -559,3 +559,33 @@ func TestConcurrentCreatesOfOneKeyStoreOneConversation(t *testing.T) {
 		t.Fatalf("stored conversations %d: %v", len(rows), err)
 	}
 }
+
+func TestAFailedCommitStopsTheWorkerOfTheConversation(t *testing.T) {
+	b, q, _ := queueBroker(t)
+	s := createConversation(t, b, "worker-stop")
+	session, _ := b.get(s.ID)
+	turn, err := b.Prompt(bg, s.ID, "work", PromptRequest{Text: "work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextQueued(t, q, "work")
+	c := counted(session)
+	c.failure = errors.New("storage is gone")
+	if err = b.receive(session, Event{Kind: "item.delta", TurnID: turn, ItemID: "m", Role: "assistant", Text: "unrecordable"}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for !q.closed.Load() && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !q.closed.Load() {
+		t.Fatal("the worker of a conversation that cannot be recorded kept running")
+	}
+	got, _ := b.Get(bg, s.ID)
+	if got.State != "disconnected" {
+		t.Fatalf("state=%s", got.State)
+	}
+	if _, err = b.Prompt(bg, s.ID, "more", PromptRequest{Text: "more"}); err == nil {
+		t.Fatal("a stopped conversation took a prompt")
+	}
+}

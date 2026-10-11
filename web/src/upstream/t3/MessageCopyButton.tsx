@@ -17,6 +17,6 @@ export const MessageCopyButton = memo(function MessageCopyButton({ text, identit
     <TooltipTrigger render={<Button data-xgc-role="agent-message-copy" data-xgc-id={`${identity}:${identityId}`} aria-label={error || (copied ? 'Copied' : 'Copy message')} onClick={() => void copy()} type="button" size="xs" variant="ghost" className="text-muted-foreground hover:text-foreground" />}>
       {copied ? <CheckIcon className="size-3 text-primary" /> : <CopyIcon className="size-3" />}
     </TooltipTrigger>
-    <TooltipPopup><p>{error || (copied ? 'Copied' : 'Copy to clipboard')}</p></TooltipPopup>
+    <TooltipPopup><p>{error || (copied ? 'Copied' : 'Copy message')}</p></TooltipPopup>
   </Tooltip>;
 });

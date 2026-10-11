@@ -20,6 +20,13 @@ const role = (name: string, id: string) => document.querySelector(`[data-xgc-rol
 afterEach(cleanup)
 
 describe('shared provider settings', () => {
+  it('lays out by the width of its container, not of the window', () => {
+    const { container } = render(<AgentProviderSettings settings={doc()} onSave={vi.fn()} />)
+    const row = container.querySelector('[data-slot="settings-row"]') as HTMLElement
+    expect(row.className).toContain('@container/settings-row')
+    expect(row.innerHTML).not.toMatch(/(^|\s)sm:grid/)
+    expect(container.querySelector('[role="navigation"]')?.parentElement?.className).toContain('@min-[48rem]/providers:grid')
+  })
   it('localizes shared Settings and composer labels while preserving native model and option labels', () => {
     render(<><AgentProviderSettings settings={doc()} onSave={vi.fn()} onRefresh={vi.fn()} locale="zh" />
       <AgentComposerControls providers={doc().providers} value={{ profileId: 'codex' }} onChange={vi.fn()} locale="zh" /></>)

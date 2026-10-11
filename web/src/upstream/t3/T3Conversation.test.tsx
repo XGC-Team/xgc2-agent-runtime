@@ -120,6 +120,14 @@ describe('migrated T3 conversation host boundary', () => {
     await waitFor(()=>expect(send).toHaveBeenCalledWith('after that'));
     expect(screen.getByRole('button',{name:'Stop generation'})).toBeTruthy();
   });
+  it('keeps the stop control still on hover', () => {
+    const input = props({ model: { sessionKey: 'stop', approvals: [], userInputs: [] } });
+    render(<T3Conversation {...input} model={{ ...input.model, items: [], isRunning: true }} onSend={vi.fn()} onInterrupt={vi.fn()} />);
+    const stop = screen.getByRole('button', { name: 'Stop generation' });
+    // Scaling the button on hover moved the glyph by a sub-pixel (PR #16012).
+    expect(stop.className).not.toContain('hover:scale-105');
+    expect(stop.className).toContain('transition-colors');
+  });
   it('preserves the controlled draft after a rejected send', async () => {
     const input = props({ model: { sessionKey: 'failure', approvals: [], userInputs: [] } });
     const onDraftChange = vi.fn();

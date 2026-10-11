@@ -3,8 +3,8 @@ import type { PendingApproval, PendingUserInput, T3ConversationModel, TimelineIt
 
 export type AgentLocale = 'en' | 'zh'
 const copy = {
-  en: { tool: 'Tool activity', activity: 'Activity', plan: 'Plan', request: 'Agent request', unconfirmed: 'Completion unconfirmed', cancelled: 'Cancelled', lastTurn: 'Last turn' },
-  zh: { tool: '工具活动', activity: '活动', plan: '计划', request: 'Agent 请求', unconfirmed: '完成结果未确认', cancelled: '已取消', lastTurn: '上一轮结果' },
+  en: { tool: 'Tool activity', activity: 'Activity', plan: 'Plan', request: 'Agent request', unconfirmed: 'Completion unconfirmed', interrupted: 'Interrupted', cancelled: 'Cancelled', lastTurn: 'Last turn' },
+  zh: { tool: '工具活动', activity: '活动', plan: '计划', request: 'Agent 请求', unconfirmed: '完成结果未确认', interrupted: '已中断', cancelled: '已取消', lastTurn: '上一轮结果' },
 }
 
 function toolData(item: AgentItem, locale: AgentLocale): ToolData | undefined {
@@ -49,8 +49,10 @@ function timelineItem(item: AgentItem, state: StreamState, locale: AgentLocale):
   const progress = ['running', 'inProgress', 'started', 'pending'].includes(item.status)
   const stalled = progress && (Boolean(item.turnStatus) || state.activeTurnId !== item.turnId || ['disconnected', 'closed'].includes(state.worker))
   // A thought has no result for the operator to confirm. Only a tool can be unconfirmed.
-  const unconfirmed = item.role === 'tool' && stalled
-  const status = unconfirmed ? copy[locale].unconfirmed : item.role !== 'tool' && progress ? undefined : item.status
+  // A tool that a stopped turn cut short is interrupted by the operator, not in doubt.
+  const interrupted = item.role === 'tool' && progress && item.turnStatus === 'cancelled'
+  const unconfirmed = item.role === 'tool' && stalled && !interrupted
+  const status = interrupted ? copy[locale].interrupted : unconfirmed ? copy[locale].unconfirmed : item.role !== 'tool' && progress ? undefined : item.status
   return { kind: 'work', id, title: item.title || (item.role === 'tool' ? copy[locale].tool : copy[locale].activity),
     detail: item.text, ...(status ? { status } : {}), tone: failed ? 'error' : unconfirmed ? 'warning' : item.role === 'tool' ? 'tool' : 'info',
     command: data?.command, toolData: data, displayTruncated: item.truncated || item.details?.truncated }

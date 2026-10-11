@@ -10,7 +10,7 @@ export function ComposerPrimaryActions({ isRunning, isSending, disabled, disable
   if (isRunning && !interruptEnabled && !queueEnabled) return null;
   const stop = isRunning && interruptEnabled ? <button type="button" disabled={disabled} onClick={onInterrupt} aria-label="Stop generation"
     data-xgc-role="agent-interrupt" data-xgc-id={`${identity}:interrupt`}
-    className={cn('flex shrink-0 cursor-pointer items-center justify-center rounded-full bg-destructive/90 text-white shadow-xs shadow-destructive/24 inset-shadow-[0_1px_--theme(--color-white/16%)] transition-all duration-150 hover:bg-destructive hover:scale-105 active:inset-shadow-[0_1px_--theme(--color-black/8%)] active:shadow-none', 'size-8 sm:h-8 sm:w-8')}
+    className={cn('flex shrink-0 cursor-pointer items-center justify-center rounded-full bg-destructive/90 text-white shadow-xs shadow-destructive/24 inset-shadow-[0_1px_--theme(--color-white/16%)] transition-colors duration-150 hover:bg-destructive active:inset-shadow-[0_1px_--theme(--color-black/8%)] active:shadow-none [&_svg]:pointer-events-none', 'size-8 sm:h-8 sm:w-8')}
   ><svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><rect x="2" y="2" width="8" height="8" rx="1.5" /></svg></button> : null;
   if (isRunning && !queueEnabled) return stop;
   const send = <button type="submit" disabled={disabled || isSending || !hasSendableContent} aria-label={isRunning ? "Queue message" : "Send message"} aria-busy={isSending}

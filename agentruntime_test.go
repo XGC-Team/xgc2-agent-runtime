@@ -486,6 +486,32 @@ func TestClaudeFinalSnapshotAndPermissionDenial(t *testing.T) {
 		t.Fatal("final message duplicated")
 	}
 }
+func TestClaudeSkillCallsNameTheSkillTheyLoad(t *testing.T) {
+	events := []Event{}
+	d := claudeDecoder{turn: "t", blocks: map[int]claudeBlock{}, sink: func(e Event) error { events = append(events, e); return nil }}
+	long := strings.Repeat("s", 400)
+	lines := []string{
+		`{"type":"assistant","session_id":"c","message":{"id":"m","content":[` +
+			`{"type":"tool_use","id":"skill-1","name":"Skill","input":{"skill":" review ","args":"x"}},` +
+			`{"type":"tool_use","id":"skill-2","name":"Skill","input":{"args":"no skill"}},` +
+			`{"type":"tool_use","id":"skill-3","name":"Skill","input":{"skill":"` + long + `"}},` +
+			`{"type":"tool_use","id":"bash-1","name":"Bash","input":{"skill":"not a skill call"}}]}}`,
+	}
+	for _, line := range lines {
+		var m map[string]any
+		_ = json.Unmarshal([]byte(line), &m)
+		if err := d.consume(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	titles := map[string]string{}
+	for _, e := range events {
+		titles[e.ItemID] = e.Title
+	}
+	if titles["skill-1"] != "Skill: review" || titles["skill-2"] != "Skill" || titles["bash-1"] != "Bash" || titles["skill-3"] != "Skill: "+long[:128] {
+		t.Fatalf("titles=%v", titles)
+	}
+}
 func TestBodyAndEventCursorGuards(t *testing.T) {
 	b, s := testBroker(t, "claude")
 	handler := Handler(b, HandlerOptions{})

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -197,6 +198,19 @@ type claudeDecoder struct {
 	identityDue bool
 }
 
+// claudeToolTitle is the heading of a tool call: the tool's name, except that a
+// Skill call names the skill it loads (known once the call's input is complete).
+func claudeToolTitle(name string, input map[string]any) string {
+	if name != "Skill" {
+		return name
+	}
+	skill := []rune(strings.TrimSpace(text(input, "skill")))
+	if len(skill) == 0 {
+		return name
+	}
+	return name + ": " + string(skill[:min(len(skill), 128)])
+}
+
 func (d *claudeDecoder) emit(e Event) error {
 	e.TurnID = d.turn
 	e.SourceMethod = "claude:stream-json"
@@ -293,7 +307,7 @@ func (d *claudeDecoder) consume(m map[string]any) error {
 			}
 			if kind == "tool_use" {
 				input, _ := json.Marshal(b["input"])
-				if err := d.emit(Event{Kind: "item.snapshot", ItemID: text(b, "id"), Role: "tool", Title: text(b, "name"), Text: string(input), Status: "running"}); err != nil {
+				if err := d.emit(Event{Kind: "item.snapshot", ItemID: text(b, "id"), Role: "tool", Title: claudeToolTitle(text(b, "name"), obj(b["input"])), Text: string(input), Status: "running"}); err != nil {
 					return err
 				}
 			}

@@ -32,7 +32,7 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 	if len(os.Args) > 1 && os.Args[1] == "--help" {
-		fmt.Println("--mcp-config --strict-mcp-config --input-format --append-system-prompt")
+		fmt.Println("--strict-mcp-config --input-format --append-system-prompt")
 		os.Exit(0)
 	}
 	if len(os.Args) > 1 && (os.Args[1] == "acp" || os.Args[1] == "-c" || os.Args[1] == "--no-auto-update" || os.Args[1] == "--print") {
@@ -44,7 +44,7 @@ func TestMain(m *testing.M) {
 func fixtureProcess() {
 	if os.Args[1] == "--print" {
 		for _, arg := range os.Args {
-			if arg == "--mcp-config" {
+			if arg == "--strict-mcp-config" {
 				fixtureClaudeMCP()
 				return
 			}

@@ -284,12 +284,11 @@ func (d *claudeDriver) promptWithControl(ctx context.Context, turn, prompt strin
 	if d.stopRequested(turn) {
 		return d.stoppedBeforeStart(turn)
 	}
-	args, environment, cleanup, err := claudeLocalMCPLaunch(ctx, args)
+	args, servers, err := claudeLocalMCPLaunch(ctx, args)
 	if err != nil {
 		return err
 	}
-	defer cleanup()
-	child, err := startChild(ctx, d.profile, args, cwd, environment...)
+	child, err := startChild(ctx, d.profile, args, cwd)
 	if err != nil {
 		return err
 	}
@@ -315,12 +314,27 @@ func (d *claudeDriver) promptWithControl(ctx context.Context, turn, prompt strin
 		child.Stop()
 		return err
 	}
+	// The handshake covers the initialization and, when the host's MCP server is
+	// registered, the registration, each with its own deadline.
 	handshake := time.AfterFunc(30*time.Second, func() { child.Stop() })
 	defer handshake.Stop()
+	sendPrompt := func() error {
+		err := control.write(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": prompt}, "parent_tool_use_id": nil, "session_id": native})
+		if err == nil {
+			d.mu.Lock()
+			d.sent = turn
+			stopped := d.stop == turn
+			d.mu.Unlock()
+			if stopped { // the stop came while the prompt was being written
+				interruptClaude(control, child)
+			}
+		}
+		return err
+	}
 	decoder := claudeDecoder{turn: turn, native: native, sink: d.sink, blocks: map[int]claudeBlock{}}
 	scanner := bufio.NewScanner(child.stdout)
 	scanner.Buffer(make([]byte, 4096), MaxFrame)
-	initialized := false
+	initialized, registered := false, false
 	for scanner.Scan() {
 		var message map[string]any
 		if json.Unmarshal(scanner.Bytes(), &message) != nil {
@@ -330,22 +344,40 @@ func (d *claudeDriver) promptWithControl(ctx context.Context, turn, prompt strin
 		switch text(message, "type") {
 		case "control_response":
 			response := obj(message["response"])
-			if text(response, "request_id") == "xgc-initialize" && !initialized {
+			switch text(response, "request_id") {
+			case "xgc-initialize":
+				if initialized {
+					break
+				}
 				if text(response, "subtype") != "success" {
 					err = errors.New("Claude initialization rejected")
 					break
 				}
 				initialized = true
 				handshake.Stop()
-				err = control.write(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": prompt}, "parent_tool_use_id": nil, "session_id": native})
+				if servers == nil {
+					err = sendPrompt()
+					break
+				}
+				handshake.Reset(claudeMCPRegistrationTimeout)
+				err = control.write(claudeMCPRegistration(servers))
+			case claudeMCPRequest:
+				if !initialized || registered || servers == nil {
+					break
+				}
+				registered = true
+				handshake.Stop()
+				if text(response, "subtype") != "success" {
+					err = errors.New("Claude rejected the registration of the host-owned MCP server")
+					break
+				}
+				// A server that did not connect leaves the turn without its tools. The
+				// answer can echo the credential, so nothing of it is shown.
+				if len(obj(obj(response["response"])["errors"])) > 0 {
+					err = d.sink(Event{Kind: "notice", Status: "error", Text: "The host's MCP server could not be reached; this turn runs without its tools.", SourceMethod: "claude:mcp_set_servers"})
+				}
 				if err == nil {
-					d.mu.Lock()
-					d.sent = turn
-					stopped := d.stop == turn
-					d.mu.Unlock()
-					if stopped { // the stop came while the prompt was being written
-						interruptClaude(control, child)
-					}
+					err = sendPrompt()
 				}
 			}
 		case "control_request":

@@ -1,39 +1,70 @@
 {
   "repository": "https://github.com/pingdotgg/t3code",
-  "ref": "bf3be75c400cf605dc0c80de9458458854c84131",
+  "ref": "477282263a9115f911380b5aec7d4973267e4edc",
   "source": "apps/server/src/provider/model-manifest.json",
-  "sourceSha256": "6a28bce6f982d3ce543e1cc57ad02c1f77d1594f375688bb9f8689bf4c1d5b84",
+  "sourceSha256": "dae36ddf363e70b030dbffae93f8ca5ea3a9bc294a1da002f49de62341f06480",
   "extraction": "providers.claudeAgent; all source model/profile entries retained. Runtime filters local CLI minimum versions and only implements direct effort flags; no prompt-injected orchestration modes.",
   "adaptedContracts": [
     {
-      "source": "apps/server/src/provider/Layers/CodexSessionRuntime.ts",
-      "sha256": "81dbf1b1bd81399d650741efbe01b4d9d18a3cceae2df81d428aafe6fd500570"
+      "source": "apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts",
+      "sha256": "309319ed5e7cd9e8f17e92d04adb158b429a85415d136a88c088b9b94b353e19",
+      "derivedFrom": {
+        "ref": "bf3be75c400cf605dc0c80de9458458854c84131",
+        "source": "apps/server/src/provider/Layers/CodexSessionRuntime.ts",
+        "sha256": "81dbf1b1bd81399d650741efbe01b4d9d18a3cceae2df81d428aafe6fd500570"
+      }
     },
     {
       "source": "apps/server/src/provider/Layers/CursorProvider.ts",
-      "sha256": "2dd63309484a337963e827bd4bff845f71b34f94de1b285d85e162bc068736ce"
+      "sha256": "2dd63309484a337963e827bd4bff845f71b34f94de1b285d85e162bc068736ce",
+      "ref": "bf3be75c400cf605dc0c80de9458458854c84131",
+      "reviewedThrough": "477282263a9115f911380b5aec7d4973267e4edc",
+      "reviewNote": "Removed upstream during the Cursor SDK migration, which this issue excludes; retain the reviewed ACP contract at the extraction pin."
     },
     {
       "source": "apps/server/src/provider/acp/CursorAcpExtension.ts",
-      "sha256": "397162c2aaebf34c58ee343ba4c99fe5d801da9d6607d82ad5e6034fe2d70451"
+      "sha256": "397162c2aaebf34c58ee343ba4c99fe5d801da9d6607d82ad5e6034fe2d70451",
+      "ref": "bf3be75c400cf605dc0c80de9458458854c84131",
+      "reviewedThrough": "477282263a9115f911380b5aec7d4973267e4edc",
+      "reviewNote": "Removed upstream during the Cursor SDK migration, which this issue excludes; retain the reviewed ACP contract at the extraction pin."
     },
     {
-      "source": "apps/server/src/provider/acp/GrokAcpSupport.ts",
-      "sha256": "60f7f497b8e42007d4ce0636f03f363856bcda9491205a121995b44401ec9a6f"
+      "source": "packages/provider-grok/src/server/acpSupport.ts",
+      "sha256": "3d089ed89581cd8e3293fcdf6be4778364ebc2e854776f04d280adc9f71c6483",
+      "derivedFrom": {
+        "ref": "bf3be75c400cf605dc0c80de9458458854c84131",
+        "source": "apps/server/src/provider/acp/GrokAcpSupport.ts",
+        "sha256": "60f7f497b8e42007d4ce0636f03f363856bcda9491205a121995b44401ec9a6f"
+      }
     },
     {
-      "source": "apps/server/src/provider/Layers/ClaudeAdapter.ts",
-      "sha256": "c1ebfef8d0ddb551fc426503f621cf0d2c5bccf76a5bcc47a35f628f72cfd36e"
+      "source": "apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts",
+      "sha256": "259af4ee817e8e3bbdeffa624d5a597b086bec6173c58f186f2e486fceb3b330",
+      "derivedFrom": {
+        "ref": "bf3be75c400cf605dc0c80de9458458854c84131",
+        "source": "apps/server/src/provider/Layers/ClaudeAdapter.ts",
+        "sha256": "c1ebfef8d0ddb551fc426503f621cf0d2c5bccf76a5bcc47a35f628f72cfd36e"
+      }
     },
     {
       "source": "apps/server/src/provider/ClaudeModelCatalog.ts",
-      "sha256": "d52e1046c6bb107eba472d81073356e343c8e2337438c1e594cbe3871b112d04"
+      "sha256": "b077bf2162d05a75f2ffd76af702513733a1b61bdd1eefe46d9f772d63a60463",
+      "derivedFrom": {
+        "ref": "bf3be75c400cf605dc0c80de9458458854c84131",
+        "source": "apps/server/src/provider/ClaudeModelCatalog.ts",
+        "sha256": "d52e1046c6bb107eba472d81073356e343c8e2337438c1e594cbe3871b112d04"
+      }
     },
     {
-      "source": "apps/server/src/provider/opencodeRuntime.ts",
-      "sha256": "b3e6171c0eabb9a0f8c9a8c6ff35b327451a8dc3bfbdb5e9c1f28fa82ec8b6dc"
+      "source": "packages/provider-opencode/src/server/OpenCodeRuntime.ts",
+      "sha256": "f9e1f5836932a74957b936c48a4f7e2961658a0e8064c9da601e2f088c08c967",
+      "derivedFrom": {
+        "ref": "bf3be75c400cf605dc0c80de9458458854c84131",
+        "source": "apps/server/src/provider/opencodeRuntime.ts",
+        "sha256": "b3e6171c0eabb9a0f8c9a8c6ff35b327451a8dc3bfbdb5e9c1f28fa82ec8b6dc"
+      }
     }
   ],
-  "boundary": "The manifest is a direct data extraction. Native option/permission mappings and Claude question keys are Go adaptations of the listed fixed T3 contracts. Local file settings, CAS, bounded probing, HTTP/SSE broker, and subprocess tests are XGC implementations. OpenCode uses its native ACP configOptions, enriched only with real models --verbose variant names. No T3 server/IDE/project/Git/worktree implementation or separate model loop is copied.",
-  "resync": "2026-09-15: 6349a0e -> bf3be75. Ported: codex thread/resume excludeTurns (+compat retry); claude resultOutcome semantics (529 overload, dead terminal_reason set, auth/rate-limit named failures via assistant error evidence); claudeAgent manifest default chat claude-fable-5-1 + fable-5 medium default effort. Reviewed, not applicable: paginated thread history/rollback (no Go history reads), MCP tool-availability prompt blocks (XGC owns developerInstructions), Cursor model-discovery Effect cache (Go inventory cache covers), opencode CLI concurrency (Go probing is sequential), pasted-text file parts (no Go attachment file parts), launchArgs permission folding (no Go launchArgs surface), rewind/fork capability (not exposed)."
+  "boundary": "The manifest is a direct data extraction. Native option/permission mappings and Claude question keys are Go adaptations of the listed fixed T3 contracts. Local file settings, CAS, bounded probing, function-first Service and mounted XRPC HTTP/event-stream handler, and subprocess tests are XGC implementations. OpenCode uses its native ACP configOptions, enriched only with real models --verbose variant names. No T3 server/IDE/project/Git/worktree implementation or separate model loop is copied.",
+  "resync": "2026-09-15: 6349a0e -> bf3be75. Ported: codex thread/resume excludeTurns (+compat retry); claude resultOutcome semantics (529 overload, dead terminal_reason set, auth/rate-limit named failures via assistant error evidence); claudeAgent manifest default chat claude-fable-5-1 + fable-5 medium default effort. Reviewed, not applicable: paginated thread history/rollback (no Go history reads), MCP tool-availability prompt blocks (XGC owns developerInstructions), Cursor model-discovery Effect cache (Go inventory cache covers), opencode CLI concurrency (Go probing is sequential), pasted-text file parts (no Go attachment file parts), launchArgs permission folding (no Go launchArgs surface), rewind/fork capability (not exposed). 2026-10-10: bf3be75 -> 4772822; provider contracts point to reviewed successor files and preserve original extraction hashes in derivedFrom. Cursor ACP files were removed by the excluded upstream SDK migration and remain explicitly pinned at bf3be75. Ported Codex turn permissions approval and archived-thread resume, Claude control-channel Stop/MCP registration and skill titles, linear ACP tool output/progress handling, Grok auto mode and ACP metadata, and reviewed model-manifest data. Already covered native-stop/lost-client/restart cases are classified in docs/upstream-review-2026-10-10.md. Server orchestration, unsupported providers and host/platform features remain excluded."
 }

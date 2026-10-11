@@ -1,5 +1,6 @@
 import { useT3Identity } from './identity.js';
 // T3 Code, MIT, Copyright (c) 2026 T3 Tools Inc.
+// Upstream ref: 477282263a9115f911380b5aec7d4973267e4edc. See UPSTREAM.md for extraction and review boundaries.
 // Extracted Timeline list, user-message disclosure, assistant row and PlainWorkEntryRow.
 // Source ranges and intentionally excluded IDE integrations are recorded in UPSTREAM.md.
 import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';

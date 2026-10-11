@@ -1,5 +1,6 @@
 import { useT3Identity } from './identity.js';
 // T3 Code ComposerPrimaryActions send/interrupt branches, MIT, 2026 T3 Tools Inc.
+// Upstream ref: 477282263a9115f911380b5aec7d4973267e4edc. See UPSTREAM.md for extraction and review boundaries.
 // IDE worktree, artwork, plan implementation and provider selection branches excluded.
 import { cn } from './utils.js';
 import { Spinner } from './ui/spinner.js';

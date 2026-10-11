@@ -1,7 +1,7 @@
 import { createContext, useContext } from "react";
 export const T3PortalContainer = createContext<HTMLElement | null | undefined>(undefined);
 // T3 Code, MIT, Copyright (c) 2026 T3 Tools Inc.
-// Upstream ref: bf3be75c400cf605dc0c80de9458458854c84131. See UPSTREAM.md for integration changes.
+// Upstream ref: 477282263a9115f911380b5aec7d4973267e4edc. See UPSTREAM.md for integration changes.
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
 
 import { cn } from "../utils.js";

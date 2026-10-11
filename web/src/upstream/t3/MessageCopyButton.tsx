@@ -1,5 +1,6 @@
 // Extracted from T3 Code MessageCopyButton.tsx; host toast/shell dependencies removed.
 // MIT, Copyright (c) 2026 T3 Tools Inc.
+// Upstream ref: 477282263a9115f911380b5aec7d4973267e4edc. See UPSTREAM.md for extraction and review boundaries.
 import { memo, useState } from 'react';
 import { useT3Identity } from './identity.js';
 import { CopyIcon, CheckIcon } from 'lucide-react';

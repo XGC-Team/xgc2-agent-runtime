@@ -1,5 +1,5 @@
 // T3 Code, MIT, Copyright (c) 2026 T3 Tools Inc.
-// Upstream ref: bf3be75c400cf605dc0c80de9458458854c84131. See UPSTREAM.md for integration changes.
+// Upstream ref: 477282263a9115f911380b5aec7d4973267e4edc. See UPSTREAM.md for integration changes.
 "use client";
 
 import { mergeProps } from "@base-ui/react/merge-props";

@@ -34,7 +34,8 @@ type optionDriver interface {
 	PromptWithOptions(context.Context, string, string, AgentOptions) error
 }
 
-// Adapted from T3 Code CodexSessionRuntime.ts at 6349a0e68a958cc51b7b5198683c1d1db88b8d28.
+// Adapted from the T3 Code Codex adapter reviewed at 477282263a9115f911380b5aec7d4973267e4edc.
+// The original contract and its successor hashes are recorded in upstream/t3/PROVENANCE.json.
 // Keep explicit permission mappings; never default an unknown value to full access.
 func codexPermissions(permission string) (approval, sandbox, turnSandbox string, err error) {
 	switch permission {

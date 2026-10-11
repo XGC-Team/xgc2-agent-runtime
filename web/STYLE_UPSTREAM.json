@@ -2,7 +2,7 @@
   "repository": "https://github.com/pingdotgg/t3code",
   "ref": "bf3be75c400cf605dc0c80de9458458854c84131",
   "path": "apps/web/src/index.css",
-  "sha256": "23afd315b595971cde86dbd514bfdf561535416e2b50d1e51956056f3231dc84",
+  "sha256": "656a6aac7b7432145aa9d9a8d962a0283648d11199220527980faf3a8f7f3d81",
   "ranges": [
     [
       140,
@@ -253,5 +253,20 @@
     "Build scopes all rules to .xgc-agent-chat with CSS @scope",
     "Tailwind theme and property names are namespaced to avoid host token collisions",
     "XGC semantic colors are mapped separately in t3-host-tokens.css"
-  ]
+  ],
+  "reviewedThrough": "477282263a9115f911380b5aec7d4973267e4edc",
+  "handPortedRules": [
+    {
+      "selector": ".chat-markdown a:not(.chat-markdown-file-link, [data-markdown-image-link])",
+      "ref": "477282263a9115f911380b5aec7d4973267e4edc",
+      "path": "apps/web/src/index.css",
+      "sha256": "ead286fe85017ef0964bce52f8701179306a06afe0fb07c2f28e92f8668b5764",
+      "lines": [
+        1898,
+        1899
+      ],
+      "changes": "Exclude image links from text underline (#17728)."
+    }
+  ],
+  "reviewNote": "2026-10-10: index.css grew from 2,122 lines at bf3be75 to 2,369 lines at 4772822. It was not re-extracted; the base ref and extraction ranges are retained. The prior sha256 identified the older 6349a0e file and is corrected to the declared bf3be75 source. Only the recorded image-link rule was hand-ported; other style/token plumbing is outside this review adaptation."
 }

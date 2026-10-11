@@ -1,5 +1,6 @@
 // T3 Code Markdown pipeline retained; IDE asset/shell/directive integrations removed.
 // MIT, Copyright (c) 2026 T3 Tools Inc. See UPSTREAM.md.
+// Upstream ref: 477282263a9115f911380b5aec7d4973267e4edc. See UPSTREAM.md for extraction and review boundaries.
 // Streaming renders reuse the parsed prefix of completed code blocks (PR #11193).
 // Unmatched `<A>` placeholders stay text (PR #16637); wide ordered-list markers keep their gutter (PR #16523).
 import { memo, useMemo } from 'react';

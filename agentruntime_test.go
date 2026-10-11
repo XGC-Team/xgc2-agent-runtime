@@ -629,8 +629,14 @@ func fixtureClaudeControl() {
 		}
 		switch text(m, "type") {
 		case "control_request":
-			if text(obj(m["request"]), "subtype") == "initialize" {
+			switch text(obj(m["request"]), "subtype") {
+			case "initialize":
 				fmt.Println(`{"type":"control_response","response":{"subtype":"success","request_id":"xgc-initialize","response":{}}}`)
+			case "interrupt":
+				// Claude aborts the turn itself: it acknowledges, ends the turn and exits.
+				fmt.Println(`{"type":"control_response","response":{"subtype":"success","request_id":"` + text(m, "request_id") + `","response":{"still_queued":[]}}}`)
+				fmt.Println(`{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"claude-control-fixture"}`)
+				return
 			}
 		case "user":
 			fmt.Println(`{"type":"system","subtype":"init","session_id":"claude-control-fixture"}`)

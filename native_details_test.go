@@ -3,6 +3,7 @@ package agentruntime
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -99,5 +100,59 @@ func TestNativeEventTimeIsPersistedReceiptTime(t *testing.T) {
 	receipt, err := time.Parse(time.RFC3339Nano, events[0].CreatedAt)
 	if err != nil || receipt.Before(start) || receipt.After(time.Now().UTC()) {
 		t.Fatalf("receipt=%v err=%v", receipt, err)
+	}
+}
+
+func TestCodexAppPermissionRequestGrantsOnlyWhatWasShown(t *testing.T) {
+	asked := make(chan Request, 1)
+	answerWith := Answer{OptionID: "accept"}
+	d := &rpcDriver{profile: Profile{Provider: "codex"}, turn: "t", nativeSession: "n", nativeTurn: "nt", turnContext: bg,
+		sink: func(Event) error { return nil },
+		ask:  func(_ context.Context, r Request) (Answer, error) { asked <- r; return answerWith, nil }}
+	profile := map[string]any{"network": map[string]any{"enabled": true}, "fileSystem": map[string]any{
+		"read": []any{"/data/in"}, "write": []any{"/data/out"},
+		"entries": []any{map[string]any{"access": "write", "path": map[string]any{"type": "glob_pattern", "pattern": "/data/**/*.csv"}}}}}
+	params := map[string]any{"threadId": "n", "turnId": "nt", "itemId": "tool", "cwd": "/work", "reason": "needs the export", "permissions": profile}
+
+	result, err := d.onRequest(bg, "item/permissions/requestApproval", params)
+	request := <-asked
+	granted := obj(result)
+	if err != nil || request.Kind != "permission" || request.SourceMethod != "item/permissions/requestApproval" || len(request.Options) != 2 {
+		t.Fatalf("request=%+v err=%v", request, err)
+	}
+	for _, want := range []string{"Network access: enabled", "Read: /data/in", "Write: /data/out", "File access (write): /data/**/*.csv", "needs the export"} {
+		if !strings.Contains(request.Text, want) {
+			t.Fatalf("review text lacks %q:\n%s", want, request.Text)
+		}
+	}
+	if !reflect.DeepEqual(granted["permissions"], profile) || granted["scope"] != "turn" {
+		t.Fatalf("grant=%v", granted)
+	}
+	// Declining and cancelling answer with an empty grant.
+	for _, answer := range []Answer{{OptionID: "decline"}, {Cancel: true}} {
+		answerWith = answer
+		result, err = d.onRequest(bg, "item/permissions/requestApproval", params)
+		<-asked
+		if empty := obj(obj(result)["permissions"]); err != nil || empty == nil || len(empty) != 0 || obj(result)["scope"] != nil {
+			t.Fatalf("answer %+v granted %v (%v)", answer, result, err)
+		}
+	}
+	// A profile the review cannot show in full is never offered.
+	for name, bad := range map[string]map[string]any{
+		"empty":              {},
+		"unknown permission": {"network": map[string]any{"enabled": true}, "camera": true},
+		"unknown field":      {"fileSystem": map[string]any{"read": []any{"/a"}, "extra": 1}},
+		"unreadable entry":   {"fileSystem": map[string]any{"entries": []any{map[string]any{"access": "write", "path": map[string]any{"type": "future"}}}}},
+		"unknown access":     {"fileSystem": map[string]any{"entries": []any{map[string]any{"access": "root", "path": map[string]any{"type": "path", "path": "/"}}}}},
+	} {
+		changed := map[string]any{"threadId": "n", "turnId": "nt", "itemId": "tool", "cwd": "/work", "permissions": bad}
+		if _, err = d.onRequest(bg, "item/permissions/requestApproval", changed); err == nil {
+			t.Fatalf("%s profile was offered", name)
+		}
+		select {
+		case r := <-asked:
+			t.Fatalf("%s profile reached the operator: %+v", name, r)
+		default:
+		}
 	}
 }

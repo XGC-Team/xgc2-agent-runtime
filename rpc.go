@@ -25,6 +25,29 @@ type rpcError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 }
+
+// nativeError is the error response of a native client. Its text is for the
+// driver's own decisions, such as recognizing a session that must be unarchived;
+// Error() names the code only, so the client's words never reach an operator.
+type nativeError struct {
+	code    int
+	message string
+}
+
+func (e *nativeError) Error() string { return protocolError(e.code).Error() }
+
+// nativeMessage is the bounded text of a native client's error response.
+func nativeMessage(err error) string {
+	var native *nativeError
+	if !errors.As(err, &native) {
+		return ""
+	}
+	if len(native.message) > 1024 {
+		return native.message[:1024]
+	}
+	return native.message
+}
+
 type incomingRequest struct {
 	cancel   context.CancelFunc
 	threadID string
@@ -108,7 +131,7 @@ func (p *rpcPeer) start(ctx context.Context, method string, params map[string]an
 		select {
 		case w := <-ch:
 			if w.Error != nil {
-				return nil, protocolError(w.Error.Code)
+				return nil, &nativeError{code: w.Error.Code, message: w.Error.Message}
 			}
 			var result map[string]any
 			if len(w.Result) == 0 || json.Unmarshal(w.Result, &result) != nil || result == nil {

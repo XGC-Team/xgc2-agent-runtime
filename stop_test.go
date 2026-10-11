@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -504,5 +505,201 @@ func TestClaudeStopBeforeTheProcessStartsIsNotLost(t *testing.T) {
 				t.Fatalf("turn ends=%v", got)
 			}
 		})
+	}
+}
+
+func TestCodexResumesAnArchivedThreadAndFallsBackWithoutExcludeTurns(t *testing.T) {
+	for _, tc := range []struct {
+		name, message string
+		steps         []string
+	}{
+		{"archived", "session 019a is archived; run codex unarchive", []string{"thread/resume", "thread/unarchive", "thread/resume"}},
+		{"old client", "unknown field `excludeTurns`", []string{"thread/resume", "thread/resume"}},
+		{"unrelated failure", "the model is unavailable", []string{"thread/resume"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, server, _, _ := codexFixture(t)
+			params := map[string]any{"threadId": "native", "excludeTurns": true}
+			done := make(chan error, 1)
+			var result map[string]any
+			go func() {
+				var err error
+				result, err = d.resumeThread(context.Background(), "native", params)
+				done <- err
+			}()
+			first := server.next("thread/resume")
+			server.send(map[string]any{"id": first["id"], "error": map[string]any{"code": -32600, "message": tc.message}})
+			for _, step := range tc.steps[1:] {
+				request := server.next(step)
+				if step == "thread/unarchive" {
+					if obj(request["params"])["threadId"] != "native" {
+						t.Fatalf("unarchive=%v", request)
+					}
+					server.reply(request, map[string]any{})
+					continue
+				}
+				if _, kept := obj(request["params"])["excludeTurns"]; kept == (tc.name == "old client") {
+					t.Fatalf("excludeTurns in the retry: %v", request["params"])
+				}
+				server.reply(request, map[string]any{"thread": map[string]any{"id": "native"}})
+			}
+			err := <-done
+			if tc.name == "unrelated failure" {
+				if err == nil || strings.Contains(err.Error(), tc.message) {
+					t.Fatalf("err=%v", err)
+				}
+				server.silent()
+				return
+			}
+			if err != nil || obj(result["thread"])["id"] != "native" {
+				t.Fatalf("result=%v err=%v", result, err)
+			}
+		})
+	}
+}
+
+func TestClaudeStopAsksTheClientToEndTheTurnItself(t *testing.T) {
+	var mu sync.Mutex
+	events := []Event{}
+	asked := make(chan struct{}, 1)
+	driver, err := NewDriver(testProfile(t, "claude"), func(e Event) error { mu.Lock(); events = append(events, e); mu.Unlock(); return nil },
+		func(ctx context.Context, r Request) (Answer, error) {
+			asked <- struct{}{}
+			<-ctx.Done() // the operator never answers: the turn is stopped instead
+			return Answer{Cancel: true}, ctx.Err()
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer driver.Close()
+	ctx, cancel := context.WithTimeout(testNativeContext(t), 10*time.Second)
+	defer cancel()
+	if err = driver.Open(ctx, t.TempDir(), ""); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- driver.(optionDriver).PromptWithOptions(ctx, "turn", "fixture", AgentOptions{Permission: "approval-required"})
+	}()
+	select {
+	case <-asked:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the turn never reached the client")
+	}
+	started := time.Now()
+	if err = driver.Cancel(ctx, "turn"); err != nil {
+		t.Fatal(err)
+	}
+	if err = <-done; err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(started); took > claudeInterruptGrace-500*time.Millisecond {
+		t.Fatalf("the turn needed %s: the client was killed instead of interrupted", took)
+	}
+	if got := turnEnds(&events, &mu); len(got) != 1 || got[0] != "cancelled" {
+		t.Fatalf("turn ends=%v", got)
+	}
+	// Claude ended the turn itself, so the conversation is saved and can be resumed.
+	identities := 0
+	for _, e := range events {
+		if e.Kind == "session.identity" && e.AgentSessionID == "claude-control-fixture" {
+			identities++
+		}
+	}
+	if identities != 1 || driver.(*claudeDriver).nativeSession != "claude-control-fixture" {
+		t.Fatalf("identity events=%d resume id=%q", identities, driver.(*claudeDriver).nativeSession)
+	}
+}
+
+func TestClaudeConversationCanBeResumedOnlyOnceATurnEnded(t *testing.T) {
+	var identities []string
+	decoder := claudeDecoder{turn: "t", blocks: map[int]claudeBlock{}, sink: func(e Event) error {
+		if e.Kind == "session.identity" {
+			identities = append(identities, e.AgentSessionID)
+		}
+		return nil
+	}}
+	feed := func(line string) {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			t.Fatal(err)
+		}
+		if err := decoder.consume(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	feed(`{"type":"system","subtype":"init","session_id":"fresh"}`)
+	feed(`{"type":"stream_event","session_id":"fresh","event":{"type":"message_start","message":{"id":"m"}}}`)
+	if len(identities) != 0 || decoder.native != "fresh" {
+		t.Fatalf("a conversation Claude may not have saved was announced: %v", identities)
+	}
+	feed(`{"type":"result","subtype":"success","is_error":false,"session_id":"fresh","result":"done"}`)
+	feed(`{"type":"result","subtype":"success","is_error":false,"session_id":"fresh","result":"again"}`)
+	if len(identities) != 1 || identities[0] != "fresh" {
+		t.Fatalf("identities=%v", identities)
+	}
+	// A conversation that was resumed is already known and announces nothing.
+	identities = nil
+	known := claudeDecoder{turn: "t", native: "earlier", blocks: map[int]claudeBlock{}, sink: decoder.sink}
+	line := map[string]any{"type": "result", "subtype": "success", "session_id": "earlier"}
+	if err := known.consume(line); err != nil || len(identities) != 0 {
+		t.Fatalf("resumed conversation announced %v (%v)", identities, err)
+	}
+}
+
+func TestGrokModesMetadataAndStop(t *testing.T) {
+	for permission, want := range map[string]string{
+		"":                  "--no-auto-update agent stdio",
+		"approval-required": "--no-auto-update --permission-mode default agent stdio",
+		"auto":              "--no-auto-update --permission-mode auto agent stdio",
+		"full-access":       "--no-auto-update agent --always-approve stdio",
+		// Grok never had an accept-edits launch mode: a stored value launches asking.
+		"auto-accept-edits": "--no-auto-update --permission-mode default agent stdio",
+	} {
+		args, err := grokPermissionArgs(permission)
+		if err != nil || strings.Join(args, " ") != want {
+			t.Fatalf("%q launches %v (%v), want %s", permission, args, err, want)
+		}
+	}
+	if _, err := grokPermissionArgs("plan"); err == nil {
+		t.Fatal("unknown Grok permission accepted")
+	}
+	advertised := []string{}
+	for _, p := range grokPermissions() {
+		advertised = append(advertised, p.ID)
+	}
+	if strings.Join(advertised, ",") != "approval-required,auto,full-access" {
+		t.Fatalf("advertised=%v", advertised)
+	}
+	if params := acpInitializeParams("grok", map[string]any{}); obj(params["_meta"])["clientType"] != "extension" {
+		t.Fatalf("grok initialize=%v", params)
+	}
+	if _, present := acpInitializeParams("opencode", map[string]any{})["_meta"]; present {
+		t.Fatal("another provider received Grok's metadata")
+	}
+
+	d, server, _, _ := acpFixture(t)
+	d.profile = Profile{Provider: "grok"}
+	done := make(chan error, 1)
+	go func() { done <- d.PromptWithOptions(context.Background(), "t1", "hello", AgentOptions{}) }()
+	prompt := server.next("session/prompt")
+	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		d.mu.Lock()
+		sent := d.promptSent
+		d.mu.Unlock()
+		if sent {
+			break
+		}
+	}
+	if err := d.Cancel(context.Background(), "t1"); err != nil {
+		t.Fatal(err)
+	}
+	cancel := server.next("session/cancel")
+	if params := obj(cancel["params"]); params["sessionId"] != "session" || obj(params["_meta"])["cancelTrigger"] != "ctrl_c" {
+		t.Fatalf("cancel=%v", params)
+	}
+	server.reply(prompt, map[string]any{"stopReason": "cancelled"})
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }

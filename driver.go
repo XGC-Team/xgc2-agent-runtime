@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -131,19 +132,14 @@ func (d *rpcDriver) Open(ctx context.Context, cwd, nativeID string) error {
 		if err = codexThreadOptions(params, d.profile.Defaults); err != nil {
 			return err
 		}
-		method := "thread/start"
 		if nativeID != "" {
-			method = "thread/resume"
 			params["threadId"] = nativeID
 			// Only the session metadata is consumed; excluding turns keeps resume cheap
 			// and tolerant of historical item schema drift (t3code CodexSessionRuntime).
 			params["excludeTurns"] = true
-		}
-		result, err = d.peer.Call(handshake, method, params)
-		if err != nil && method == "thread/resume" && strings.Contains(err.Error(), "excludeTurns") {
-			// Older pinned CLIs without excludeTurns: retry with full history.
-			delete(params, "excludeTurns")
-			result, err = d.peer.Call(handshake, method, params)
+			result, err = d.resumeThread(handshake, nativeID, params)
+		} else {
+			result, err = d.peer.Call(handshake, "thread/start", params)
 		}
 		if err == nil {
 			nativeID = text(obj(result["thread"]), "id")
@@ -153,7 +149,7 @@ func (d *rpcDriver) Open(ctx context.Context, cwd, nativeID string) error {
 		if d.profile.Provider == "cursor" {
 			capabilities["_meta"] = map[string]any{"parameterizedModelPicker": true}
 		}
-		init, e := d.peer.Call(handshake, "initialize", map[string]any{"protocolVersion": 1, "clientInfo": map[string]any{"name": "xgc-agent-runtime", "version": "0.1.0"}, "clientCapabilities": capabilities})
+		init, e := d.peer.Call(handshake, "initialize", acpInitializeParams(d.profile.Provider, capabilities))
 		if e != nil {
 			return e
 		}
@@ -389,7 +385,11 @@ func (d *rpcDriver) deliverStop(ctx context.Context, turn string, sent bool) err
 		_, err := d.peer.Call(ctx, "turn/interrupt", map[string]any{"threadId": native, "turnId": nativeTurn})
 		return err
 	}
-	return d.peer.Notify("session/cancel", map[string]any{"sessionId": native})
+	cancel := map[string]any{"sessionId": native}
+	if d.profile.Provider == "grok" {
+		cancel["_meta"] = grokCancelMeta
+	}
+	return d.peer.Notify("session/cancel", cancel)
 }
 func (d *rpcDriver) Close() error {
 	d.mu.Lock()
@@ -627,9 +627,14 @@ func (d *rpcDriver) acpEvent(u map[string]any) {
 		d.mu.Unlock()
 		e.Text = text(content, "text")
 	case "tool_call", "tool_call_update":
+		// A tool call that appears ends the message in progress. Progress on a call
+		// already shown, such as a background command finishing, does not: the
+		// answer around it stays one message.
 		d.mu.Lock()
-		d.messageID = ""
-		d.messageRole = ""
+		if _, shown := d.tools[text(u, "toolCallId")]; !shown {
+			d.messageID = ""
+			d.messageRole = ""
+		}
 		d.mu.Unlock()
 		e.Kind = "item.patch"
 		e.Role = "tool"
@@ -809,4 +814,28 @@ func (d *rpcDriver) flushTools() {
 	for _, e := range held {
 		d.emit(e)
 	}
+}
+
+var archivedThread = regexp.MustCompile(`(?i)\bsession \S+ is archived\b|\bcodex unarchive\b`)
+
+// resumeThread resumes a Codex thread. A thread the client archived is
+// unarchived and resumed again, which keeps its history (t3code #15389); a
+// client without excludeTurns is asked again for the full history.
+func (d *rpcDriver) resumeThread(ctx context.Context, threadID string, params map[string]any) (map[string]any, error) {
+	result, err := d.peer.Call(ctx, "thread/resume", params)
+	if err == nil {
+		return result, nil
+	}
+	message := nativeMessage(err)
+	switch {
+	case archivedThread.MatchString(message):
+		if _, unarchived := d.peer.Call(ctx, "thread/unarchive", map[string]any{"threadId": threadID}); unarchived != nil {
+			return nil, err
+		}
+		return d.peer.Call(ctx, "thread/resume", params)
+	case strings.Contains(message, "excludeTurns"):
+		delete(params, "excludeTurns")
+		return d.peer.Call(ctx, "thread/resume", params)
+	}
+	return nil, err
 }

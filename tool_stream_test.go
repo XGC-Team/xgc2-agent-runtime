@@ -128,3 +128,26 @@ func TestCodexTurnDiffUsesTheSameEconomy(t *testing.T) {
 		t.Fatalf("%d events carry %d bytes for %d bytes of diff", count, bytes, len(diff))
 	}
 }
+
+func TestProgressOnAShownToolCallDoesNotSplitTheAnswer(t *testing.T) {
+	f := newToolStream(t)
+	chunk := func(s string) {
+		f.d.acpEvent(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": s}})
+	}
+	chunk("Starting. ")
+	f.d.acpEvent(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "bg", "title": "Run build", "status": "in_progress"})
+	chunk("Meanwhile ")
+	f.d.acpEvent(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "bg", "status": "completed"}) // the background command finished
+	chunk("done.")
+	f.d.acpEvent(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "next", "title": "Another", "status": "in_progress"})
+	chunk("After a new call.")
+	var ids []string
+	for _, e := range f.events {
+		if e.Role == "assistant" {
+			ids = append(ids, e.ItemID)
+		}
+	}
+	if len(ids) != 4 || ids[0] == ids[1] || ids[1] != ids[2] || ids[2] == ids[3] {
+		t.Fatalf("message segments %v", ids)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 )
 
 // Legacy callers retain the narrow Read/Glob/Grep stream. Configured providers
@@ -23,6 +24,11 @@ type claudeDriver struct {
 	// stop is the turn the operator asked to stop, remembered until that
 	// turn's process exists and is stopped.
 	stop string
+	// control is the stdin channel of the running turn's process and sent the
+	// turn whose prompt has been written to it: only then can Claude be asked
+	// to end the turn itself.
+	control *claudeControl
+	sent    string
 }
 
 func (d *claudeDriver) Open(ctx context.Context, cwd, nativeID string) error {
@@ -91,7 +97,7 @@ func (d *claudeDriver) Prompt(ctx context.Context, turn, prompt string) error {
 	d.mu.Lock()
 	d.process = nil
 	cancelled := d.stop == turn
-	if decoder.native != "" {
+	if decoder.terminal && decoder.native != "" {
 		d.nativeSession = decoder.native
 	}
 	d.mu.Unlock()
@@ -118,12 +124,33 @@ func (d *claudeDriver) Prompt(ctx context.Context, turn, prompt string) error {
 func (d *claudeDriver) Cancel(_ context.Context, turn string) error {
 	d.mu.Lock()
 	d.stop = turn
-	p := d.process
+	p, control, sent := d.process, d.control, d.sent == turn
 	d.mu.Unlock()
-	if p != nil {
+	switch {
+	case p == nil:
+	case control != nil && sent:
+		interruptClaude(control, p)
+	default:
 		go p.Stop()
 	}
 	return nil
+}
+
+// claudeInterruptGrace is how long Claude gets to end an interrupted turn
+// itself, which saves the turn to its conversation, before its process is stopped.
+const claudeInterruptGrace = 3 * time.Second
+
+// interruptClaude asks Claude to abort the running turn through its control
+// channel (t3code #13999). Killing a first turn before Claude has saved it
+// leaves a conversation that cannot be resumed; a client that does not answer
+// within the grace period is stopped.
+func interruptClaude(control *claudeControl, p *child) {
+	err := control.write(map[string]any{"type": "control_request", "request_id": "xgc-interrupt", "request": map[string]any{"subtype": "interrupt"}})
+	if err != nil {
+		go p.Stop()
+		return
+	}
+	time.AfterFunc(claudeInterruptGrace, p.Stop)
 }
 
 func (d *claudeDriver) stopRequested(turn string) bool {
@@ -164,6 +191,10 @@ type claudeDecoder struct {
 	lastTextID    string
 	authFailed    bool
 	rateLimited   bool
+	// identityDue: the conversation id is announced when the turn has ended, the
+	// first time Claude can be sure to have saved it. A turn that dies earlier
+	// leaves no id to resume.
+	identityDue bool
 }
 
 func (d *claudeDecoder) emit(e Event) error {
@@ -184,9 +215,7 @@ func (d *claudeDecoder) consume(m map[string]any) error {
 		}
 		if d.native == "" {
 			d.native = id
-			if err := d.emit(Event{Kind: "session.identity", AgentSessionID: id}); err != nil {
-				return err
-			}
+			d.identityDue = true
 		}
 	}
 	switch text(m, "type") {
@@ -289,6 +318,12 @@ func (d *claudeDecoder) consume(m map[string]any) error {
 		}
 	case "result":
 		d.terminal = true
+		if d.identityDue {
+			d.identityDue = false
+			if err := d.emit(Event{Kind: "session.identity", AgentSessionID: d.native}); err != nil {
+				return err
+			}
+		}
 		d.status = "failed"
 		if m["is_error"] != true && text(m, "subtype") == "success" {
 			d.status = "completed"

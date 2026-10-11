@@ -40,14 +40,24 @@ func versionAtLeast(actual, minimum string) bool {
 	}
 	return true
 }
+
+// claudeCatalog lists the models of the fixed catalog the installed CLI can run:
+// the current ones first, then the legacy ones, each group in catalog order.
 func claudeCatalog(version string) []Model {
 	manifest := claudeManifest()
 	profiles := obj(manifest["profiles"])
 	models := []Model{}
+	for _, status := range []func(string) bool{func(s string) bool { return s != "legacy" }, func(s string) bool { return s == "legacy" }} {
+		models = append(models, claudeModels(manifest, profiles, version, status)...)
+	}
+	return models
+}
+func claudeModels(manifest, profiles map[string]any, version string, status func(string) bool) []Model {
+	models := []Model{}
 	for _, raw := range arr(manifest["models"]) {
 		entry := obj(raw)
 		minimum := text(obj(obj(entry["adapter"])["claudeCode"]), "minVersion")
-		if minimum != "" && !versionAtLeast(version, minimum) {
+		if (minimum != "" && !versionAtLeast(version, minimum)) || !status(text(entry, "status")) {
 			continue
 		}
 		model := Model{ID: text(entry, "slug"), Label: text(entry, "name"), Efforts: []NamedValue{}}
@@ -297,6 +307,10 @@ func (d *claudeDriver) promptWithControl(ctx context.Context, turn, prompt strin
 	defer cancel()
 	control := &claudeControl{ctx: controlCtx, input: child.stdin, ask: d.ask, native: native, pending: map[string]context.CancelFunc{}}
 	defer control.close()
+	d.mu.Lock()
+	d.control = control
+	d.mu.Unlock()
+	defer func() { d.mu.Lock(); d.control, d.sent = nil, ""; d.mu.Unlock() }()
 	if err = control.write(map[string]any{"type": "control_request", "request_id": "xgc-initialize", "request": map[string]any{"subtype": "initialize", "hooks": nil}}); err != nil {
 		child.Stop()
 		return err
@@ -324,6 +338,15 @@ func (d *claudeDriver) promptWithControl(ctx context.Context, turn, prompt strin
 				initialized = true
 				handshake.Stop()
 				err = control.write(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": prompt}, "parent_tool_use_id": nil, "session_id": native})
+				if err == nil {
+					d.mu.Lock()
+					d.sent = turn
+					stopped := d.stop == turn
+					d.mu.Unlock()
+					if stopped { // the stop came while the prompt was being written
+						interruptClaude(control, child)
+					}
+				}
 			}
 		case "control_request":
 			control.request(message)
@@ -356,7 +379,7 @@ func (d *claudeDriver) promptWithControl(ctx context.Context, turn, prompt strin
 	d.mu.Lock()
 	d.process = nil
 	cancelled := d.stop == turn
-	if decoder.native != "" {
+	if decoder.terminal && decoder.native != "" {
 		d.nativeSession = decoder.native
 	}
 	d.mu.Unlock()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -180,5 +181,37 @@ func TestClaudeQuestionControlPreservesNativeQuestionKeysAndAnswers(t *testing.T
 	decision := obj(obj(response["response"])["response"])
 	if text(decision, "behavior") != "allow" || text(obj(obj(decision["updatedInput"])["answers"]), "Which checks?") != "A, B" {
 		t.Fatalf("native answer mapping: %+v", decision)
+	}
+}
+
+func TestClaudeCatalogListsCurrentModelsBeforeLegacyOnes(t *testing.T) {
+	models := claudeCatalog("2.1.296")
+	ids := []string{}
+	legacy := false
+	for _, m := range models {
+		ids = append(ids, m.ID)
+		isLegacy := false
+		for _, raw := range arr(claudeManifest()["models"]) {
+			if entry := obj(raw); text(entry, "slug") == m.ID {
+				isLegacy = text(entry, "status") == "legacy"
+			}
+		}
+		if legacy && !isLegacy {
+			t.Fatalf("current model %s follows a legacy one: %v", m.ID, ids)
+		}
+		legacy = legacy || isLegacy
+	}
+	for _, want := range []string{"claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1"} {
+		if !slices.Contains(ids, want) {
+			t.Fatalf("catalog lacks %s: %v", want, ids)
+		}
+	}
+	if !legacy || !slices.Contains(ids, "claude-opus-5") {
+		t.Fatalf("legacy models vanished: %v", ids)
+	}
+	for _, m := range models {
+		if m.ID == "claude-haiku-5-5" && len(m.Efforts) == 0 {
+			t.Fatalf("new model without its efforts: %+v", m)
+		}
 	}
 }

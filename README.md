@@ -1,6 +1,6 @@
 # XGC2 Agent Runtime
 
-Shared runtime that presents local third-party agent CLIs through one XGC conversation contract. The Go module normalizes provider protocols, launches a reviewed executable, and stores session events, questions, approvals, cancellation, explicit resume, and bounded HTTP/SSE replay. It does not implement a model loop, project store, robot controller, or workspace policy.
+Shared runtime that presents local third-party agent CLIs through one XGC conversation contract. The Go module normalizes provider protocols, launches a reviewed executable, and stores session events, questions, approvals, cancellation, explicit resume, and journal replay through XRPC HTTP/event streams. It does not implement a model loop, project store, robot controller, or workspace policy.
 
 Context and workspace values are identifiers. They do not carry filesystem paths. Provider credentials stay with those CLIs. This repository does not read a home directory, shell profile, or secret store, and it does not embed a machine path.
 
@@ -22,12 +22,39 @@ settings, err := nativeagent.NewStore(sharedSettingsBinding)
 prepare := func(ctx context.Context, scope nativeagent.Create, sessionID string, fresh bool) (string, error) {
     return productPrepare(ctx, scope, sessionID, fresh)
 }
-broker, err := nativeagent.Open(mux, nativeagent.OpenOptions{
+broker, err := nativeagent.Open(nativeagent.OpenOptions{
     Storage: conversations, Settings: settings, NativeFiles: hostNativeFiles, Prepare: prepare,
-    BasePath: "/api/agent-runtime",
 })
 // Handle err. Close broker before closing its storage transport and file roots.
+var service nativeagent.Service = broker
+session, err := service.Create(ctx, "create:operator-action", create)
+// Handle err. Call the same service directly or mount it on the host edge.
+const prefix = "/api/agent-runtime"
+mux.Handle(prefix+"/", http.StripPrefix(prefix,
+    nativeagent.Handler(service, nativeagent.HandlerOptions{})))
+edge, err := httpx.ServeEdge(listener, authenticatedHostHandler(mux), httpx.HostOptions{
+    MaxInFlight: 256, MaxConnections: 256,
+})
+// Handle err. The host owns listener, authentication and edge shutdown.
 ```
+
+`nativeagent` is `github.com/XGC-Team/xgc2-agent-runtime`; `httpx` is
+`github.com/XGC-Team/xgc2-xrpc/go/httpx`. `Open(OpenOptions)` returns a `*Broker`
+implementing the function-first [`Service`](service.go). Every service call
+takes the caller's context. The API includes provider settings, conversation
+creation/listing/metadata, prompt and queue commands, Stop, reconnect/close,
+pending inputs/answers, the host decision evaluator, attention and event
+subscriptions. `Subscribe(ctx, id, afterSeq, emit)` replays the journal and then
+emits live events until the context ends; ending it leaves the worker running.
+
+[`Handler`](xrpc_service.go) mounts that service as XRPC `http.v1`, named
+`xgc2.agent-runtime.v1.AgentRuntime` with API version `1`. Authentication,
+authorization, CORS and CSRF belong to the host. The former loopback/Host checks
+and `X-XGC-Agent-Client` mutation guard are removed. Size edge `MaxInFlight` and
+`MaxConnections` for open streams plus ordinary calls; the values above are
+examples. Leave edge `MaxCallTime` and `MaxResponseBytes` unset for event streams.
+The mounted handler bounds ordinary calls at 70 seconds and request bodies at
+256 KiB by default (`HandlerOptions.MaxCallTime` / `MaxBodyBytes`).
 
 `hostNativeFiles` comes from `NewNativeFiles` with explicitly opened host grants;
 see [native file capabilities](docs/native-files.md). The storage owner initializes
@@ -49,19 +76,25 @@ reviewed workspace revision and fresh/resume policy. `Factory` is injectable
 for deterministic protocol tests. The default factory starts the selected
 reviewed native CLI; native login remains owned by that CLI.
 
-A product may use a `research-project` context with an exact clean Git commit, or an
-`experiment` context with a server-configured workspace. Those policies do not
-enter this package. Idempotency is scoped to context kind and
-ID; a repeated key with changed workspace/profile/consent is a conflict.
+The host supplies context/workspace policy. Create idempotency is scoped to
+context kind and ID; a repeated key with changed workspace/profile/consent is a
+conflict. The keys of `Create`, `Prompt` and queue enqueue travel as XRPC
+`X-Request-ID`, replacing the private `Idempotency-Key` header. Reuse the same
+request ID and content when retrying. A mutation returning `deadline_exceeded`
+has an unknown outcome, so retry it with that same ID. Success bodies contain
+the result directly; failures use XRPC error codes and
+`{"error":{"code","message","details"?}}`. The optional
+`X-Xrpc-Timeout-Ms` header requests a budget within the handler's cap.
 
 ```ts
 import { createAgentClient } from '@xgc2/agent-runtime/client'
 import { AgentConversation, useAgentStream } from '@xgc2/agent-runtime/react'
 import '@xgc2/agent-runtime/styles.css'
 
-const client = createAgentClient({ basePath: '/api/agent-runtime' })
+const transport = { basePath: '/api/agent-runtime', fetch: hostFetch }
+const client = createAgentClient(transport)
 // Inside a product component:
-const { state, connection, error } = useAgentStream(session, reload, client)
+const { state, connection, error } = useAgentStream(session, reload, transport)
 // Render shared native facts and forward only explicit operator decisions:
 <AgentConversation state={state} locale="en"
   onSend={(text) => sendWithProductIdempotency(session.id, text)}
@@ -70,13 +103,16 @@ const { state, connection, error } = useAgentStream(session, reload, client)
 ```
 
 The client exposes provider settings/refresh and profiles/sessions/create/prompt/answer/cancel/reconnect/close.
-Inject `fetch` for product transport tests. Both HTTP and SSE accept only a
-same-origin absolute API root. The HTTP server independently enforces loopback
-peer, loopback Host, same-origin browser requests and the custom mutation
-header `X-XGC-Agent-Client: 1`. A product-controlled proxy on the same machine may forward the original matching
-Host/Origin and mutation header over a real loopback connection, after checking
-its own resource/session authority. Forwarded headers never establish trust;
-remote authenticated ingress is not provided.
+It uses `@xgc2/xrpc-client.call()` and throws `XrpcError` with code, status,
+request ID and disposition. `isStaleRequest(error)` identifies an input conflict
+whose `details.reason` is `stale`. `basePath` accepts an origin-relative path or
+an HTTP(S) URL. Optional `headers` and `fetch` carry host credentials and support
+transport tests; `deadlines` overrides the 15-second ordinary and 70-second
+inspection/connect budgets. `useAgentStream` uses `@xgc2/xrpc-client.events()`
+with the same host transport options. It resumes from the last applied sequence
+via `Last-Event-ID` or `?after=`; a `reset` discards the prior projection and
+replays from the first event. Event streams have no unary call deadline or
+periodic recycle. Invalid events stop the stream with an English diagnosis.
 
 The single protocol schema is `xgc.agent-runtime/v1`. Deltas append, snapshots
 replace, patches preserve text, and item identity includes its turn. Submitted
@@ -155,18 +191,19 @@ second agent loop.
 ## Verification and adoption
 
 ```bash
-go test -race ./...
-go vet ./...
-npm --prefix web ci --ignore-scripts
-npm --prefix web test
+go vet ./... && go test -p 2 ./...
+cd web
+npm ci && npm run build && npm run lint && npx vitest run
+node --test test/*.test.mjs
 ```
 
 Go tests use fake subprocess protocol fixtures; they make no vendor requests.
 The frontend uses Node's native test runner for reducer and transport tests,
 and Vitest for the shared chat and decision controls.
 Consumer typechecking checks the React hook against its installed React peer.
-Research integration remains in `platforms/research-os` and uses a local Go
-replace plus a `file:` dependency. Run `npm --prefix web ci --ignore-scripts` and
+The current development inputs use a local Go replace for XRPC and a `file:`
+dependency on `@xgc2/xrpc-client`; integration must pin the released inputs.
+Run `npm --prefix web ci` and
 `npm --prefix web run build` before installing a consumer. Generated `dist`
 is a package artifact and is not a second source authority. Install local file
 dependencies with
@@ -181,13 +218,23 @@ system sandbox is implied by these extraction tests.
 ### Optional durable prompt queue
 
 `POST /sessions/{id}/queue` accepts `enqueue`, `edit`, `remove`, `reorder`,
-`pause`, and `resume`. Enqueue uses its stable Idempotency-Key; other mutations
+`pause`, and `resume`. Enqueue uses its stable XRPC request ID; other mutations
 require the current `expectedRevision`. The committed `prompt.queue` event
 projects the ordered pending messages and pause state. A queued message captures
 its model, effort, and permission selection at admission. Normal completion
 advances one message; failed, interrupted, or unknown completion pauses the
 remaining queue. Host restart retains pending input but requires explicit resume.
 A durably submitted user item is never replayed as another turn after a crash.
+
+Stop holds pending messages before asking the native client to cancel. That
+hold survives normal completion, a refused Stop, reconnect and restart; only
+an explicit queue `resume` releases it. Messages admitted while Stop is in
+flight are held too. Stopping an empty queue does not hold future messages.
+Rejected commands and validation errors do not create a hold. The turn enters
+`cancelling` only after the native client accepts Stop; a refusal keeps the turn
+and its approvals active. A lost native client ends the turn as `unknown` and
+holds the queue. `CloseSession` followed by `Reconnect` recovers a stalled Stop
+without resending the prior prompt.
 
 Queueing is separate from provider steering and from answering native approval
 or question requests. Hosts opt into `AgentConversation.queueEnabled` and use
@@ -200,7 +247,16 @@ The deployment input is `storage-manifest.json`. The host supplies explicit
 storage scopes and database/schema identities. Conversation metadata, ordered
 events and submitted prompt identities commit in one CAS batch. Provider settings
 use a separate shared scope and revision CAS. Storage owns database files and
-FULL durability; the broker retains no transcript files or event cache.
+FULL durability; the broker retains no transcript files.
+
+`StorageBinding.JournalDelay` defaults to `DefaultJournalDelay` (200 ms).
+Streamed deltas and other non-durable updates are published immediately and
+batched within that delay; a host crash can lose the uncommitted tail. Submitted
+user snapshots, queue commands, identity/metadata/runtime changes, input
+submission/resolution and turn endings commit immediately; acting calls wait
+for the required durable event. No broker or session lock is held across
+storage calls. A failed commit stops that conversation's worker and reports
+`unavailable`. `Broker.Close` flushes pending events with a 15-second bound.
 
 Startup reads saved metadata and queue references. It marks interrupted sessions
 as disconnected and pauses retained queued prompts; resume is explicit. A lost

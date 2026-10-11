@@ -1,4 +1,4 @@
-/** Matches Broker.Queue/PromptWithOptions: SHA-256(session + NUL + idempotency key).
+/** Matches Broker.Queue/Prompt: SHA-256(session + NUL + idempotency key), where the key is the XRPC request id.
  * This is correlation only; the broker remains the admission authority.
  */
 export async function agentPromptTurnId(sessionId: string, key: string): Promise<string> {

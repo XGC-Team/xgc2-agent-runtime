@@ -1,36 +1,42 @@
 import { useEffect, useRef, useState } from 'react'
+import { events, XrpcError } from '@xgc2/xrpc-client'
 import { applyEvent, emptyStream, type AgentSession } from './state.js'
 import { nativeAgentBasePath } from './client.js'
 
-export type AgentStreamTransport = (options: {
-  url: string
-  lastEventId: () => string
-  onEvent: (event: unknown) => void
-  onOpen: () => void
-  onError: (cause?: unknown) => void
-  onInvalid: (cause: unknown) => void
-}) => { close: () => void }
+/**
+ * `headers` and `fetch` reach the event stream as they do the client's calls;
+ * a `fetch` that adds credentials per request keeps them fresh across the
+ * stream's reconnects. They are read when the stream opens: change `reload` to
+ * reopen it with new ones.
+ */
+export type AgentStreamOptions = { basePath: string; headers?: Record<string, string>; fetch?: typeof globalThis.fetch }
 
-export type AgentStreamOptions = { basePath: string; openStream?: AgentStreamTransport }
-
-const openEventSource: AgentStreamTransport = (options) => {
-  const stream = new EventSource(options.url)
-  stream.addEventListener('native-agent', (message) => {
-    try { options.onEvent(JSON.parse((message as MessageEvent<string>).data) as unknown) }
-    catch (cause) { options.onInvalid(cause) }
-  })
-  stream.onopen = options.onOpen
-  stream.onerror = options.onError
-  return stream
+export const AGENT_STREAM_STATUS = {
+  idle: 'Not connected',
+  connecting: 'Connecting',
+  connected: 'Connected',
+  interrupted: 'Connection interrupted; resuming from the event cursor. The task is not resent.',
+  draining: 'The service is restarting; resuming from the event cursor. The task is not resent.',
+  invalid: 'Event validation failed',
+  refused: 'The event stream was refused',
 }
 
-export function useAgentStream(session: AgentSession | undefined, reload: number, { basePath, openStream = openEventSource }: AgentStreamOptions) {
+/**
+ * Follows a conversation's event stream (the XRPC http.v1 event stream of the
+ * service) and reduces it into display state. The stream resumes from the last
+ * event it applied; when the service no longer knows that cursor it starts over
+ * from the first event. A reconnect only replays the journal and never resends
+ * a prompt.
+ */
+export function useAgentStream(session: AgentSession | undefined, reload: number, { basePath, headers, fetch }: AgentStreamOptions) {
   const root = nativeAgentBasePath(basePath)
+  const transport = useRef({ headers, fetch })
+  transport.current = { headers, fetch }
   const initial = () => emptyStream(session?.id ?? '', session?.provider ?? 'codex')
   const current = useRef(initial())
   const lastReload = useRef(reload)
   const [state, setState] = useState(initial)
-  const [connection, setConnection] = useState('未连接')
+  const [connection, setConnection] = useState(AGENT_STREAM_STATUS.idle)
   const [error, setError] = useState('')
   useEffect(() => {
     if (!session) return
@@ -39,16 +45,14 @@ export function useAgentStream(session: AgentSession | undefined, reload: number
       setState(current.current)
       lastReload.current = reload
     }
-    setError(''); setConnection('正在连接')
+    setError(''); setConnection(AGENT_STREAM_STATUS.connecting)
+    const abort = new AbortController()
     let active = true, frame: number | undefined
     let queue: unknown[] = []
-    // Transport callbacks may run before openStream returns its close handle.
-    // eslint-disable-next-line prefer-const
-    let stream: ReturnType<AgentStreamTransport> | undefined
     let invalid = false
-    const fail = (cause: unknown) => {
-      if (!active) return
-      invalid = true; stream?.close(); queue = []; setConnection('事件校验失败')
+    const fail = (cause: unknown, status: string) => {
+      if (!active || invalid) return
+      invalid = true; abort.abort(); queue = []; setConnection(status)
       setError(cause instanceof Error ? cause.message : String(cause))
     }
     const flush = () => {
@@ -58,29 +62,46 @@ export function useAgentStream(session: AgentSession | undefined, reload: number
         let next = current.current
         for (const event of queue) next = applyEvent(next, event)
         queue = []; current.current = next; setState(next)
-      } catch (cause) { fail(cause) }
+      } catch (cause) { fail(cause, AGENT_STREAM_STATUS.invalid) }
     }
-    stream = openStream({
-      url: `${root}/sessions/${encodeURIComponent(session.id)}/events?after=${current.current.cursor}`,
-      lastEventId: () => String(current.current.cursor),
-      onEvent: (event) => {
+    const { headers: extra, fetch: transportFetch } = transport.current
+    const cursor = current.current.cursor
+    events(`${root}/sessions/${encodeURIComponent(session.id)}/events`, {
+      ...(cursor > 0 ? { after: String(cursor) } : {}),
+      signal: abort.signal,
+      ...(extra ? { headers: extra } : {}),
+      ...(transportFetch ? { fetch: transportFetch } : {}),
+      onOpen: () => { if (active && !invalid) setConnection(AGENT_STREAM_STATUS.connected) },
+      onError: () => { if (active && !invalid) setConnection(AGENT_STREAM_STATUS.interrupted) },
+      onClosing: () => { if (active && !invalid) setConnection(AGENT_STREAM_STATUS.draining) },
+      // The service does not know the cursor (its journal restarted or was
+      // restored): what was shown may not be what is stored. Start over.
+      onReset: () => {
         if (!active || invalid) return
-        queue.push(event)
+        if (frame !== undefined) cancelAnimationFrame(frame)
+        frame = undefined; queue = []
+        current.current = emptyStream(session.id, session.provider)
+        setState(current.current)
+      },
+      onEvent: ({ event, data }) => {
+        if (!active || invalid || event !== 'event') return
+        let parsed: unknown
+        try { parsed = JSON.parse(data) } catch (cause) { fail(cause, AGENT_STREAM_STATUS.invalid); return }
+        queue.push(parsed)
         if (queue.length >= 256) { if (frame !== undefined) cancelAnimationFrame(frame); flush() }
         else if (frame === undefined) frame = requestAnimationFrame(flush)
       },
-      onOpen: () => { if (active && !invalid) setConnection('已连接') },
-      onError: () => { if (active && !invalid) setConnection('连接中断，正在按事件游标恢复；任务未重发') },
-      onInvalid: fail,
+    }).catch((cause: unknown) => {
+      // Only a failure retrying cannot fix ends the stream: the service refused it.
+      fail(cause instanceof XrpcError ? new Error(`${cause.message} (${cause.code})`) : cause, AGENT_STREAM_STATUS.refused)
     })
-    if (invalid) stream.close()
     return () => {
-      active = false; stream?.close()
+      active = false; abort.abort()
       if (frame !== undefined) cancelAnimationFrame(frame)
       // Unrendered frames are replayed on the next mount from our committed
       // cursor. Hiding the UI never sends cancel/close to the native process.
       queue = []
     }
-  }, [session?.id, session?.provider, reload, root, openStream])
+  }, [session?.id, session?.provider, reload, root])
   return { state: state.sessionId === session?.id ? state : initial(), connection, error }
 }

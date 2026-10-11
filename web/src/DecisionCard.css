@@ -1,4 +1,4 @@
-/* Shared by native tool permission requests and ground station decisions. */
+/* Shared by native tool permission requests and the decisions a host presents. */
 .xgc-decision-card {
   --xgc-decision-bg: var(--color-bg-surface);
   --xgc-decision-fg: var(--color-text);

@@ -5,6 +5,7 @@ import { createAgentClient } from '../dist/client.js'
 import { decodeSession, AGENT_RUNTIME_SCHEMA } from '../dist/state.js'
 const settings = () => ({ revision: 'r1', providers: [{ id: 'codex', provider: 'codex', enabled: true, binaryPath: '', available: false, version: '', login: { status: 'unknown', detail: 'Not probed\nUse Refresh.' }, defaults: {}, models: [], permissions: [] }] })
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } })
+const root = 'https://core.test/api/agent-runtime'
 test('settings preserve real unknown and empty capabilities, reject malformed catalog identities', () => {
   assert.deepEqual(decodeNativeSettings(settings()), settings())
   for (const change of [s => { s.providers[0].login.status = 'ready' }, s => { s.providers[0].provider = 'fake' }, s => { s.providers.push(s.providers[0]) }, s => { s.providers[0].defaults = { env: 'unsafe' } }, s => { s.providers[0].models = [{ id: 'm', label: 'M', efforts: [], defaultEffort: 'imaginary' }] }]) {
@@ -13,19 +14,19 @@ test('settings preserve real unknown and empty capabilities, reject malformed ca
 })
 test('settings routes preserve the explicit revision and refresh only one provider', async () => {
   const calls = []
-  const client = createAgentClient({ basePath: '/api/agent-runtime', fetch: async (url, init) => { calls.push({ url, init }); return json({ data: settings() }) } })
+  const client = createAgentClient({ basePath: root, fetch: async (url, init) => { calls.push({ url: String(url), init }); return json(settings()) } })
   await client.getNativeSettings()
   const update = { revision: 'editing-baseline', provider: { id: 'codex', provider: 'codex', enabled: true, defaults: { model: 'real' } } }
   await client.updateNativeSettings(update)
   await client.refreshNativeSettings('codex')
-  assert.deepEqual(calls.map(call => call.url), ['/api/agent-runtime/settings', '/api/agent-runtime/settings', '/api/agent-runtime/settings/refresh'])
+  assert.deepEqual(calls.map(call => call.url), [`${root}/settings`, `${root}/settings`, `${root}/settings/refresh`])
   assert.deepEqual(JSON.parse(calls[1].init.body), update)
   assert.deepEqual(JSON.parse(calls[2].init.body), { id: 'codex' })
 })
 test('settings conflicts are returned once without automatic refresh or replay', async () => {
   let attempts = 0
-  const client = createAgentClient({ basePath: '/api/agent-runtime', fetch: async () => { attempts++; return json({ error: { code: 'stale', message: 'Changed externally' } }, 409) } })
-  await assert.rejects(client.updateNativeSettings({}), error => error.status === 409 && error.message === 'Changed externally')
+  const client = createAgentClient({ basePath: root, fetch: async () => { attempts++; return json({ error: { code: 'conflict', message: 'Changed externally' } }, 409) } })
+  await assert.rejects(client.updateNativeSettings({}), error => error.status === 409 && error.code === 'conflict' && error.message === 'Changed externally')
   assert.equal(attempts, 1)
 })
 test('resolved session options and requested options retain distinct meanings, while legacy sessions still decode', () => {
@@ -38,7 +39,7 @@ test('resolved session options and requested options retain distinct meanings, w
 })
 test('prompt fourth-argument options reach the real request without changing the legacy three-argument call', async () => {
   const calls = []
-  const client = createAgentClient({ basePath: '/agents', fetch: async (url, init) => { calls.push(JSON.parse(init.body)); return json({ data: { turnId: 't_00000000000000000000000000000000' } }) } })
+  const client = createAgentClient({ basePath: root, fetch: async (url, init) => { calls.push(JSON.parse(init.body)); return json({ turnId: 't_00000000000000000000000000000000' }, 202) } })
   await client.sendNativePrompt('s1', 'hello', 'key1')
   await client.sendNativePrompt('s1', 'hello again', 'key2', { model: 'actual', effort: 'high', permission: 'full-access' })
   assert.deepEqual(calls, [{ text: 'hello' }, { text: 'hello again', options: { model: 'actual', effort: 'high', permission: 'full-access' } }])

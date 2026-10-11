@@ -61,6 +61,7 @@
     "@base-ui/react": "1.5.0",
     "@legendapp/list": "3.3.5",
     "@lexical/react": "0.41.0",
+    "@xgc2/xrpc-client": "file:../../xrpc-web/ts",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "lexical": "0.41.0",

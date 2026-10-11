@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -43,6 +45,15 @@ type rpcDriver struct {
 	acpSetup         map[string]any
 	cwd              string
 	launchPermission string
+	// stop is the turn the operator asked to stop. It is remembered until the
+	// native client can take it (the native turn is acknowledged, the ACP prompt
+	// is on the wire) and delivered once: stopSent is the turn it went out for.
+	stop       string
+	stopSent   string
+	promptSent bool
+	// tools is what subscribers have been sent of each streamed tool output of
+	// the turn (see toolUpdate).
+	tools map[string]*streamedTool
 }
 
 func (d *rpcDriver) emit(e Event) {
@@ -114,26 +125,21 @@ func (d *rpcDriver) Open(ctx context.Context, cwd, nativeID string) error {
 			return e
 		}
 		if text(obj(account["account"]), "type") != "chatgpt" {
-			return errors.New("ChatGPT login required; Research OS will not fall back to API billing")
+			return errors.New("ChatGPT login required; API billing is not used")
 		}
 		params := map[string]any{"cwd": cwd}
 		localMCPThreadContext(ctx, params)
 		if err = codexThreadOptions(params, d.profile.Defaults); err != nil {
 			return err
 		}
-		method := "thread/start"
 		if nativeID != "" {
-			method = "thread/resume"
 			params["threadId"] = nativeID
 			// Only the session metadata is consumed; excluding turns keeps resume cheap
 			// and tolerant of historical item schema drift (t3code CodexSessionRuntime).
 			params["excludeTurns"] = true
-		}
-		result, err = d.peer.Call(handshake, method, params)
-		if err != nil && method == "thread/resume" && strings.Contains(err.Error(), "excludeTurns") {
-			// Older pinned CLIs without excludeTurns: retry with full history.
-			delete(params, "excludeTurns")
-			result, err = d.peer.Call(handshake, method, params)
+			result, err = d.resumeThread(handshake, nativeID, params)
+		} else {
+			result, err = d.peer.Call(handshake, "thread/start", params)
 		}
 		if err == nil {
 			nativeID = text(obj(result["thread"]), "id")
@@ -143,7 +149,7 @@ func (d *rpcDriver) Open(ctx context.Context, cwd, nativeID string) error {
 		if d.profile.Provider == "cursor" {
 			capabilities["_meta"] = map[string]any{"parameterizedModelPicker": true}
 		}
-		init, e := d.peer.Call(handshake, "initialize", map[string]any{"protocolVersion": 1, "clientInfo": map[string]any{"name": "xgc-agent-runtime", "version": "0.1.0"}, "clientCapabilities": capabilities})
+		init, e := d.peer.Call(handshake, "initialize", acpInitializeParams(d.profile.Provider, capabilities))
 		if e != nil {
 			return e
 		}
@@ -163,7 +169,7 @@ func (d *rpcDriver) Open(ctx context.Context, cwd, nativeID string) error {
 				}
 			}
 			if !cached {
-				return errors.New("Grok cached login is unavailable; log in outside Research OS")
+				return errors.New("Grok cached login is unavailable; log in with the Grok client first")
 			}
 			if _, err = d.peer.Call(handshake, "authenticate", map[string]any{"methodId": "cached_token", "_meta": map[string]any{"headless": true}}); err != nil {
 				return err
@@ -233,15 +239,39 @@ func (d *rpcDriver) PromptWithOptions(ctx context.Context, turn, prompt string, 
 	d.messageSerial = 0
 	d.messageID = ""
 	d.messageRole = ""
+	d.promptSent = false
+	d.tools = map[string]*streamedTool{}
 	native := d.nativeSession
 	done := d.turnDone
 	d.mu.Unlock()
-	defer func() { d.mu.Lock(); d.turnContext = nil; d.turn = ""; d.nativeTurn = ""; d.mu.Unlock() }()
+	defer func() {
+		d.mu.Lock()
+		d.turnContext = nil
+		d.turn = ""
+		d.nativeTurn = ""
+		d.promptSent = false
+		d.mu.Unlock()
+	}()
+	if d.stopRequested(turn) {
+		return d.stoppedBeforeStart()
+	}
 	if d.profile.Provider != "codex" {
 		if err := d.applyACPOptions(ctx, options); err != nil {
 			return err
 		}
-		result, err := d.peer.Call(ctx, "session/prompt", map[string]any{"sessionId": native, "prompt": localMCPACPContent(ctx, prompt)})
+		if d.stopRequested(turn) {
+			return d.stoppedBeforeStart()
+		}
+		wait, err := d.peer.start(ctx, "session/prompt", map[string]any{"sessionId": native, "prompt": localMCPACPContent(ctx, prompt)})
+		if err != nil {
+			return err
+		}
+		// A stop that came while the prompt was being written would have reached
+		// the client before it: send it now that the prompt is on the wire.
+		if err = d.deliverStop(ctx, turn, true); err != nil {
+			d.emit(Event{Kind: "notice", Status: "error", Text: stopNotDelivered})
+		}
+		result, err := wait()
 		if err != nil {
 			return err
 		}
@@ -254,6 +284,7 @@ func (d *rpcDriver) PromptWithOptions(ctx context.Context, turn, prompt string, 
 		case "refusal":
 			status = "refused"
 		}
+		d.flushTools()
 		d.emit(Event{Kind: "turn.end", Status: status, SourceMethod: "session/prompt"})
 		return nil
 	}
@@ -278,12 +309,17 @@ func (d *rpcDriver) PromptWithOptions(ctx context.Context, turn, prompt string, 
 	if !same {
 		return errors.New("turn identity mismatch")
 	}
+	// A stop that came before the native turn was acknowledged is applied now.
+	if err = d.deliverStop(ctx, turn, false); err != nil {
+		d.emit(Event{Kind: "notice", Status: "error", Text: stopNotDelivered})
+	}
 	for {
 		select {
 		case terminal := <-done:
 			if terminal.id != nativeTurn {
 				continue
 			}
+			d.flushTools()
 			d.emit(Event{Kind: "turn.end", Status: terminal.status, Text: terminal.message, SourceMethod: "turn/completed"})
 			return nil
 		case <-ctx.Done():
@@ -293,21 +329,67 @@ func (d *rpcDriver) PromptWithOptions(ctx context.Context, turn, prompt string, 
 		}
 	}
 }
-func (d *rpcDriver) Cancel(ctx context.Context) error {
+
+const stopNotDelivered = "The stop request could not be delivered to the client."
+
+// Cancel records the stop and delivers it when the native client can take it:
+// at once for a running turn, otherwise when the turn starts.
+func (d *rpcDriver) Cancel(ctx context.Context, turn string) error {
 	d.mu.Lock()
-	native, turn := d.nativeSession, d.nativeTurn
+	d.stop = turn
+	peer := d.peer
 	d.mu.Unlock()
-	if d.peer == nil {
+	if peer == nil {
 		return ErrUnavailable
 	}
+	return d.deliverStop(ctx, turn, false)
+}
+
+func (d *rpcDriver) stopRequested(turn string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.stop == turn
+}
+
+// stoppedBeforeStart ends a turn the operator stopped before it reached the
+// native client; nothing was sent, so nothing needs to be interrupted.
+func (d *rpcDriver) stoppedBeforeStart() error {
+	d.emit(Event{Kind: "turn.end", Status: "cancelled", SourceMethod: "stop"})
+	return nil
+}
+
+// deliverStop sends the remembered stop of turn to the native client, once.
+// Codex interrupts the native turn, which exists only after turn/started or the
+// turn/start result; ACP cancels the session, which only means something while
+// its prompt is on the wire. ACP's prompt marks that moment with sent.
+func (d *rpcDriver) deliverStop(ctx context.Context, turn string, sent bool) error {
+	d.mu.Lock()
+	if sent {
+		d.promptSent = true
+	}
+	due := d.stop == turn && d.stopSent != turn && d.turn == turn
 	if d.profile.Provider == "codex" {
-		if turn == "" {
-			return errors.New("turn not yet acknowledged; close the session to stop the worker")
-		}
-		_, err := d.peer.Call(ctx, "turn/interrupt", map[string]any{"threadId": native, "turnId": turn})
+		due = due && d.nativeTurn != ""
+	} else {
+		due = due && d.promptSent
+	}
+	if due {
+		d.stopSent = turn
+	}
+	native, nativeTurn := d.nativeSession, d.nativeTurn
+	d.mu.Unlock()
+	if !due {
+		return nil
+	}
+	if d.profile.Provider == "codex" {
+		_, err := d.peer.Call(ctx, "turn/interrupt", map[string]any{"threadId": native, "turnId": nativeTurn})
 		return err
 	}
-	return d.peer.Notify("session/cancel", map[string]any{"sessionId": native})
+	cancel := map[string]any{"sessionId": native}
+	if d.profile.Provider == "grok" {
+		cancel["_meta"] = grokCancelMeta
+	}
+	return d.peer.Notify("session/cancel", cancel)
 }
 func (d *rpcDriver) Close() error {
 	d.mu.Lock()
@@ -374,7 +456,16 @@ func (d *rpcDriver) codexEvent(method string, p map[string]any) {
 	case "turn/started":
 		d.mu.Lock()
 		d.nativeTurn = text(obj(p["turn"]), "id")
+		turn, turnContext := d.turn, d.turnContext
 		d.mu.Unlock()
+		if turnContext != nil && d.stopRequested(turn) {
+			// The read loop must not wait for the response of its own request.
+			go func() {
+				if d.deliverStop(turnContext, turn, false) != nil {
+					d.emit(Event{Kind: "notice", Status: "error", Text: stopNotDelivered})
+				}
+			}()
+		}
 		return
 	case "turn/completed":
 		t := obj(p["turn"])
@@ -466,7 +557,10 @@ func (d *rpcDriver) codexEvent(method string, p map[string]any) {
 		e.ItemID = "turn-diff"
 		e.Role = "tool"
 		e.Title = "Proposed diff"
-		e.Text = text(p, "diff")
+		var emit bool
+		if e, emit = d.toolUpdate(e, text(p, "diff")); !emit {
+			return
+		}
 	case "error":
 		e.Kind = "notice"
 		e.Status = "error"
@@ -533,22 +627,32 @@ func (d *rpcDriver) acpEvent(u map[string]any) {
 		d.mu.Unlock()
 		e.Text = text(content, "text")
 	case "tool_call", "tool_call_update":
+		// A tool call that appears ends the message in progress. Progress on a call
+		// already shown, such as a background command finishing, does not: the
+		// answer around it stays one message.
 		d.mu.Lock()
-		d.messageID = ""
-		d.messageRole = ""
+		if _, shown := d.tools[text(u, "toolCallId")]; !shown {
+			d.messageID = ""
+			d.messageRole = ""
+		}
 		d.mu.Unlock()
 		e.Kind = "item.patch"
 		e.Role = "tool"
 		e.ItemID = text(u, "toolCallId")
 		e.Title = text(u, "title")
 		e.Status = text(u, "status")
-		if c, ok := u["content"]; ok {
-			e.Kind = "item.snapshot"
-			e.Text = toolContent(arr(c))
-		}
 		if e.ItemID == "" {
 			d.emit(Event{Kind: "notice", Text: "This tool omitted its identity."})
 			return
+		}
+		if c, ok := u["content"]; ok {
+			e.Kind = "item.snapshot"
+			var emit bool
+			if e, emit = d.toolUpdate(e, toolContent(arr(c))); !emit {
+				return
+			}
+		} else {
+			d.toolPatched(e)
 		}
 	case "plan":
 		e.Kind = "item.snapshot"
@@ -576,20 +680,23 @@ func contentText(content []any) string {
 	}
 	return result
 }
+
+// toolContent renders the content of a tool call. Entries are separated, not
+// terminated, by a line break, so output that grows only appends to the text.
 func toolContent(content []any) string {
-	result := ""
+	parts := []string{}
 	for _, v := range content {
 		m := obj(v)
 		switch text(m, "type") {
 		case "content":
-			result += contentText([]any{m["content"]})
+			parts = append(parts, strings.TrimSuffix(contentText([]any{m["content"]}), "\n"))
 		case "diff":
-			result += text(m, "path") + "\n--- before\n" + text(m, "oldText") + "\n+++ after\n" + text(m, "newText") + "\n"
+			parts = append(parts, text(m, "path")+"\n--- before\n"+text(m, "oldText")+"\n+++ after\n"+text(m, "newText"))
 		default:
-			result += "[non-text tool content]\n"
+			parts = append(parts, "[non-text tool content]")
 		}
 	}
-	return result
+	return strings.Join(parts, "\n")
 }
 func planText(entries []any) string {
 	result := ""
@@ -598,4 +705,137 @@ func planText(entries []any) string {
 		result += "[" + text(m, "status") + "] " + text(m, "content") + "\n"
 	}
 	return result
+}
+
+// streamedToolPersistEvery is how many rewrites of a tool's output are folded
+// into one event when the output did not merely grow.
+const streamedToolPersistEvery = 10
+
+// streamedTool is what subscribers have been sent of one tool's output.
+type streamedTool struct {
+	text, title, status string
+	// big output is no longer compared with what was sent, to bound memory.
+	big bool
+	// latest is the newest output a rewrite held back, sent at the end of the turn at the latest.
+	latest  string
+	skipped int
+}
+
+// maxStreamedTool bounds the output kept per tool to find what was appended.
+const maxStreamedTool = 1 << 20
+
+// toolUpdate decides what a repeated full snapshot of a tool's output costs.
+// Agents resend the whole output with every update, so journaling each one
+// grows the log with the square of the output. Nothing is sent when the output
+// did not change; output that only grew is sent as the appended suffix; other
+// rewrites are sent every streamedToolPersistEvery-th time. The first sight of
+// a tool, a new title or status, and a terminal status are always sent in full.
+func (d *rpcDriver) toolUpdate(e Event, output string) (Event, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.tools == nil {
+		d.tools = map[string]*streamedTool{}
+	}
+	tool := d.tools[e.ItemID]
+	first := tool == nil
+	if first {
+		tool = &streamedTool{}
+		d.tools[e.ItemID] = tool
+	}
+	moved := first || (e.Title != "" && e.Title != tool.title) || (e.Status != "" && e.Status != tool.status)
+	terminal := e.Status == "completed" || e.Status == "failed"
+	if e.Title != "" {
+		tool.title = e.Title
+	}
+	if e.Status != "" {
+		tool.status = e.Status
+	}
+	if !moved && !terminal {
+		switch {
+		case tool.skipped == 0 && !tool.big && output == tool.text:
+			return e, false
+		case tool.skipped == 0 && !tool.big && strings.HasPrefix(output, tool.text):
+			e.Kind, e.Title, e.Status, e.Text = "item.delta", "", "", output[len(tool.text):]
+			tool.text = output
+			tool.big = len(output) > maxStreamedTool
+			return e, true
+		case tool.skipped+1 < streamedToolPersistEvery:
+			tool.skipped++
+			tool.latest = output
+			return e, false
+		}
+	}
+	tool.text, tool.big = output, len(output) > maxStreamedTool
+	if tool.big {
+		tool.text = ""
+	}
+	tool.latest, tool.skipped = "", 0
+	e.Text = output
+	return e, true
+}
+
+// toolPatched records the title and status a patch (an update without content) sent.
+func (d *rpcDriver) toolPatched(e Event) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.tools == nil {
+		d.tools = map[string]*streamedTool{}
+	}
+	tool := d.tools[e.ItemID]
+	if tool == nil {
+		tool = &streamedTool{}
+		d.tools[e.ItemID] = tool
+	}
+	if e.Title != "" {
+		tool.title = e.Title
+	}
+	if e.Status != "" {
+		tool.status = e.Status
+	}
+}
+
+// flushTools sends the output that rewrites held back, so a turn never ends
+// with a tool showing less than the agent last said.
+func (d *rpcDriver) flushTools() {
+	d.mu.Lock()
+	held := []Event{}
+	for id, tool := range d.tools {
+		if tool.skipped > 0 {
+			held = append(held, Event{Kind: "item.snapshot", Role: "tool", ItemID: id, Text: tool.latest})
+			tool.text, tool.big = tool.latest, len(tool.latest) > maxStreamedTool
+			if tool.big {
+				tool.text = ""
+			}
+			tool.latest, tool.skipped = "", 0
+		}
+	}
+	d.mu.Unlock()
+	sort.Slice(held, func(i, j int) bool { return held[i].ItemID < held[j].ItemID })
+	for _, e := range held {
+		d.emit(e)
+	}
+}
+
+var archivedThread = regexp.MustCompile(`(?i)\bsession \S+ is archived\b|\bcodex unarchive\b`)
+
+// resumeThread resumes a Codex thread. A thread the client archived is
+// unarchived and resumed again, which keeps its history (t3code #15389); a
+// client without excludeTurns is asked again for the full history.
+func (d *rpcDriver) resumeThread(ctx context.Context, threadID string, params map[string]any) (map[string]any, error) {
+	result, err := d.peer.Call(ctx, "thread/resume", params)
+	if err == nil {
+		return result, nil
+	}
+	message := nativeMessage(err)
+	switch {
+	case archivedThread.MatchString(message):
+		if _, unarchived := d.peer.Call(ctx, "thread/unarchive", map[string]any{"threadId": threadID}); unarchived != nil {
+			return nil, err
+		}
+		return d.peer.Call(ctx, "thread/resume", params)
+	case strings.Contains(message, "excludeTurns"):
+		delete(params, "excludeTurns")
+		return d.peer.Call(ctx, "thread/resume", params)
+	}
+	return nil, err
 }

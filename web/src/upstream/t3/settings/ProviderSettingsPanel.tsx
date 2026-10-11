@@ -9,10 +9,11 @@ import type { AgentProviderConfiguration } from '../../../providerSettings.js';
 export function ProviderSettingsPanel({ providers, selectedId, onSelect, children, locale = 'en' }: {
   locale?: 'en' | 'zh'; providers: readonly AgentProviderConfiguration[]; selectedId: string; onSelect: (id: string) => void; children: ReactNode;
 }) {
-  // 去卡片化：列表-编辑两栏靠留白与发丝线分区，不再套边框底卡（编辑排版纪律）
+  // The list and the editor are separated by whitespace and a hairline, not by bordered cards.
   // 8.5rem still fits a provider name. The editor then keeps login and version on one line.
-  return <div className="lg:grid lg:grid-cols-[8.5rem_minmax(0,1fr)] lg:gap-0">
-    <div className="mb-3 lg:mb-0" role="navigation" aria-label={locale === 'zh' ? '供应者' : 'Providers'}>
+  // The two columns follow the width of the container, not of the window: the host may embed this in a narrow panel.
+  return <div className="@container/providers"><div className="@min-[48rem]/providers:grid @min-[48rem]/providers:grid-cols-[8.5rem_minmax(0,1fr)] @min-[48rem]/providers:gap-0">
+    <div className="mb-3 @min-[48rem]/providers:mb-0" role="navigation" aria-label={locale === 'zh' ? '供应者' : 'Providers'}>
       {providers.map(provider => { const Icon = providerIcons[provider.provider]; const selected = selectedId === provider.id; return <button key={provider.id} type="button"
         onClick={() => onSelect(provider.id)} aria-pressed={selected}
         data-xgc-role="agent-provider-select" data-xgc-id={provider.id}
@@ -24,6 +25,6 @@ export function ProviderSettingsPanel({ providers, selectedId, onSelect, childre
         </span>
       </button>; })}
     </div>
-    <div className="min-w-0 lg:border-l lg:border-border/50 lg:pl-6">{children}</div>
-  </div>;
+    <div className="min-w-0 @min-[48rem]/providers:border-l @min-[48rem]/providers:border-border/50 @min-[48rem]/providers:pl-6">{children}</div>
+  </div></div>;
 }

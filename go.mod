@@ -3,7 +3,7 @@ module github.com/XGC-Team/xgc2-agent-runtime
 go 1.25.0
 
 require (
-	github.com/XGC-Team/xgc2-storage v0.0.0-20261009000126-609572d72236
+	github.com/XGC-Team/xgc2-storage v0.0.0-20261010075957-dec664004f2e
 	github.com/XGC-Team/xgc2-xrpc/go v0.0.0-20261009012948-b04f601ce153
 	golang.org/x/sys v0.42.0
 )
@@ -25,6 +25,4 @@ require (
 	modernc.org/sqlite v1.46.2 // indirect
 )
 
-replace github.com/XGC-Team/xgc2-storage => ../storage
-
-replace github.com/XGC-Team/xgc2-xrpc/go => ../xrpc/go
+replace github.com/XGC-Team/xgc2-xrpc/go => ../xrpc-go/go

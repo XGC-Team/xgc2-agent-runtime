@@ -12,7 +12,7 @@ import { ComposerPendingUserInputPanel } from './upstream/t3/ComposerPendingUser
 import { MessagesTimeline } from './upstream/t3/MessagesTimeline.js';
 import { Button } from './upstream/t3/ui/button.js';
 import { T3PortalContainer, TooltipProvider } from './upstream/t3/ui/tooltip.js';
-import { buildPendingUserInputAnswers, derivePendingUserInputProgress, setPendingUserInputCustomAnswer, togglePendingUserInputOptionSelection, type PendingUserInputDraftAnswer } from './upstream/t3/pendingUserInput.js';
+import { buildPendingUserInputAnswers, carryDisplacedCustomAnswerIntoPrompt, derivePendingUserInputProgress, setPendingUserInputCustomAnswer, togglePendingUserInputOptionSelection, type PendingUserInputDraftAnswer } from './upstream/t3/pendingUserInput.js';
 import type { PendingUserInput, T3ConversationModel } from './upstream/t3/types.js';
 export type { T3ConversationModel, TimelineItem, PendingApproval, PendingUserInput, ToolData } from './upstream/t3/types.js';
 
@@ -56,9 +56,11 @@ function ErrorBanner({ error }: { error: string }) {
 }
 function messageOf(error: unknown) { return error instanceof Error ? error.message : String(error); }
 
-function UserInputCard({ request, active, disabled, onUserInput, onCancelRequest }: {
+function UserInputCard({ request, active, disabled, onUserInput, onCancelRequest, onDisplacedAnswer }: {
   request: PendingUserInput; active: boolean; disabled: boolean;
   onUserInput: T3RequestCallbacks['onUserInput']; onCancelRequest: T3RequestCallbacks['onCancelRequest'];
+  /** Receives the text typed into the answer field when an option replaces it. */
+  onDisplacedAnswer?: (text: string) => void;
 }) {
   const identity = useT3Identity();
   const [answers, setAnswers] = useState<Record<string, PendingUserInputDraftAnswer>>({});
@@ -92,7 +94,15 @@ function UserInputCard({ request, active, disabled, onUserInput, onCancelRequest
     {request.title ? <ComposerBanner.Row><ComposerBanner.Content>{request.title}</ComposerBanner.Content></ComposerBanner.Row> : null}
     <ComposerPendingUserInputPanel pendingUserInputs={[request]} active={active && !locked}
       respondingRequestIds={locked ? [request.requestId] : []} answers={answers} questionIndex={questionIndex}
-      onToggleOption={(id, value) => { const question = request.questions.find(item => item.id === id); if (question && !locked) setAnswers(current => ({ ...current, [id]: togglePendingUserInputOptionSelection(question, current[id], value) })); }}
+      onToggleOption={(id, value) => {
+        const question = request.questions.find(item => item.id === id);
+        if (!question || locked) return;
+        // The option replaces the typed answer. What the operator typed goes back to
+        // the conversation draft instead of vanishing; a secret answer never does.
+        const displaced = answers[id]?.customAnswer;
+        if (displaced?.trim() && !question.isSecret) onDisplacedAnswer?.(displaced);
+        setAnswers(current => ({ ...current, [id]: togglePendingUserInputOptionSelection(question, current[id], value) }));
+      }}
       onAdvance={advance}
     />
     {progress.activeQuestion?.allowCustomAnswer !== false ? <ComposerBanner.Body>
@@ -117,7 +127,7 @@ function UserInputCard({ request, active, disabled, onUserInput, onCancelRequest
   </ComposerBanner.Root>;
 }
 
-function PendingRequestsContent({ model, active, disabled = false, locale = 'en', renderApprovalControls, onRefreshRequests, staleRequestIds, onApproval, onUserInput, onCancelRequest }: T3PendingRequestsProps) {
+function PendingRequestsContent({ model, active, disabled = false, locale = 'en', renderApprovalControls, onRefreshRequests, staleRequestIds, onApproval, onUserInput, onCancelRequest, onDisplacedAnswer }: T3PendingRequestsProps & { onDisplacedAnswer?: (text: string) => void }) {
   const [busy, setBusy] = useState<Set<string>>(() => new Set());
   const [submitted, setSubmitted] = useState<Set<string>>(() => new Set());
   const [error, setError] = useState('');
@@ -156,7 +166,7 @@ function PendingRequestsContent({ model, active, disabled = false, locale = 'en'
         {approval.detail ? <p className="m-0 truncate font-mono text-xs" title={approval.detail.split('\n')[0]}>{approval.detail.split('\n')[0]}</p> : null}
       </DecisionCard>;
     })}
-    {model.userInputs.map(request => <UserInputCard key={request.requestId} request={request} active={active} disabled={disabled} onUserInput={onUserInput} onCancelRequest={onCancelRequest} />)}
+    {model.userInputs.map(request => <UserInputCard key={request.requestId} request={request} active={active} disabled={disabled} onUserInput={onUserInput} onCancelRequest={onCancelRequest} onDisplacedAnswer={onDisplacedAnswer} />)}
     <ErrorBanner error={error} />
   </div>;
 }
@@ -182,6 +192,7 @@ function ConversationContent({ model, queueEnabled = false, active, disabled = f
   const [error, setError] = useState('');
   const inFlight = useRef(false);
   const locked = !active || disabled;
+  const keepTypedAnswer = useCallback((text: string) => setPromptRef.current(carryDisplacedCustomAnswerIntoPrompt(promptRef.current, text)), []);
   const send = useCallback(async () => {
     if (!composerEnabled || locked || sendDisabled || (!queueEnabled && (model.isRunning || model.isSending)) || inFlight.current || !prompt.trim()) return;
     const sentPrompt = prompt;
@@ -204,7 +215,7 @@ function ConversationContent({ model, queueEnabled = false, active, disabled = f
       timelineState={timelineState} onTimelineStateChange={onTimelineStateChange} /></div>
     {model.approvals.length || model.userInputs.length || additionalPendingRequests ? <div className="min-h-0 max-h-[45%] shrink overflow-y-auto px-3 pb-2 sm:px-5"
       data-xgc-role="agent-request-queue" data-xgc-id={model.sessionKey}>
-      <PendingRequestsContent model={model} active={active} disabled={disabled} {...callbacks} />
+      <PendingRequestsContent model={model} active={active} disabled={disabled} onDisplacedAnswer={composerEnabled ? keepTypedAnswer : undefined} {...callbacks} />
       {additionalPendingRequests}
     </div> : null}
     {(composerEnabled || (model.isRunning && interruptEnabled) || dock) ? <div className="flex shrink-0 flex-col gap-2 px-3 pb-3 sm:px-5">

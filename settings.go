@@ -153,7 +153,7 @@ func (b *Broker) reloadSettingsProfiles() error {
 	}
 	return nil
 }
-func (b *Broker) Settings() (Settings, error) {
+func (b *Broker) Settings(context.Context) (Settings, error) {
 	if b.settings == nil {
 		return Settings{}, ErrUnavailable
 	}
@@ -196,7 +196,7 @@ func (b *Broker) Settings() (Settings, error) {
 }
 func resolveProfile(input ProviderUpdate) (Profile, error) {
 	if !safeID.MatchString(input.ID) {
-		return Profile{}, errors.New("invalid provider ID")
+		return Profile{}, invalid("invalid provider ID")
 	}
 	if _, err := commandArgs(input.Provider); err != nil {
 		return Profile{}, err
@@ -205,18 +205,18 @@ func resolveProfile(input ProviderUpdate) (Profile, error) {
 	command := strings.TrimSpace(input.BinaryPath)
 
 	if strings.ContainsAny(command, "\x00\r\n") {
-		return p, errors.New("invalid binary path")
+		return p, invalid("invalid binary path")
 	}
 	path, err := lookupProvider(input.Provider, command)
 	if err != nil {
 		if p.Disabled && input.Defaults == (AgentOptions{}) {
 			return p, nil
 		}
-		return p, errors.New("executable not found")
+		return p, invalid("executable not found")
 	}
 	path, err = filepath.EvalSymlinks(path)
 	if err != nil {
-		return p, errors.New("executable cannot be resolved")
+		return p, invalid("executable cannot be resolved")
 	}
 	path, err = filepath.Abs(path)
 	if err != nil {
@@ -229,7 +229,7 @@ func resolveProfile(input ProviderUpdate) (Profile, error) {
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil || !info.Mode().IsRegular() || info.Mode()&0111 == 0 {
-		return p, errors.New("executable must be a regular executable file")
+		return p, invalid("executable must be a regular executable file")
 	}
 	h := sha256.New()
 	if _, err = io.Copy(h, f); err != nil {
@@ -244,7 +244,7 @@ func resolveProfile(input ProviderUpdate) (Profile, error) {
 func (b *Broker) RefreshSettings(ctx context.Context, id string) (Settings, error) {
 	ctx, cancel := context.WithTimeout(ctx, AgentSettingsTimeout)
 	defer cancel()
-	current, err := b.Settings()
+	current, err := b.Settings(ctx)
 	if err != nil {
 		return Settings{}, err
 	}
@@ -271,7 +271,7 @@ func (b *Broker) RefreshSettings(ctx context.Context, id string) (Settings, erro
 	// Discovery-only entries have no profile yet; preserve their bounded probe result.
 	s.inventory["discovered:"+id] = inventory
 	s.mu.Unlock()
-	return b.Settings()
+	return b.Settings(ctx)
 }
 func (b *Broker) UpdateSettings(ctx context.Context, input SettingsUpdate) (Settings, error) {
 	ctx, cancel := context.WithTimeout(ctx, AgentSettingsTimeout)
@@ -295,7 +295,7 @@ func (b *Broker) UpdateSettings(ctx context.Context, input SettingsUpdate) (Sett
 	}
 	for _, p := range prior {
 		if p.ID == input.Provider.ID && p.Provider != input.Provider.Provider {
-			return Settings{}, errors.New("provider identity cannot change")
+			return Settings{}, invalid("provider identity cannot change")
 		}
 	}
 	profile, err := resolveProfile(input.Provider)
@@ -332,7 +332,7 @@ func (b *Broker) UpdateSettings(ctx context.Context, input SettingsUpdate) (Sett
 	if profile.Executable != "" && preserved == nil {
 		profile.ReviewedVersion = inventory.Version
 		if profile.ReviewedVersion == "" {
-			return Settings{}, errors.New("CLI version could not be verified")
+			return Settings{}, classified{ErrUnavailable, "CLI version could not be verified"}
 		}
 	}
 	if err = validateOptions(input.Provider.Defaults, inventory); err != nil && preserved == nil {
@@ -353,7 +353,7 @@ func (b *Broker) UpdateSettings(ctx context.Context, input SettingsUpdate) (Sett
 		if p.ID == profile.ID {
 			if p.Provider != profile.Provider {
 				s.mu.Unlock()
-				return Settings{}, errors.New("provider identity cannot change")
+				return Settings{}, invalid("provider identity cannot change")
 			}
 			profiles[i] = profile
 			found = true
@@ -362,7 +362,7 @@ func (b *Broker) UpdateSettings(ctx context.Context, input SettingsUpdate) (Sett
 	if !found {
 		if len(profiles) >= 16 {
 			s.mu.Unlock()
-			return Settings{}, errors.New("provider limit reached")
+			return Settings{}, exhausted("provider limit reached")
 		}
 		profiles = append(profiles, profile)
 	}
@@ -374,11 +374,11 @@ func (b *Broker) UpdateSettings(ctx context.Context, input SettingsUpdate) (Sett
 	if err != nil {
 		return Settings{}, err
 	}
-	return b.Settings()
+	return b.Settings(ctx)
 }
 func validateOptions(o AgentOptions, p ProviderSetting) error {
 	if o.Model == "" && o.Effort != "" {
-		return errors.New("select a model before its reasoning effort")
+		return invalid("select a model before its reasoning effort")
 	}
 	if o.Model != "" {
 		found := false
@@ -391,14 +391,14 @@ func validateOptions(o AgentOptions, p ProviderSetting) error {
 						valid = valid || effort.ID == o.Effort
 					}
 					if !valid {
-						return errors.New("reasoning effort is not advertised for this model")
+						return invalid("reasoning effort is not advertised for this model")
 					}
 				}
 				break
 			}
 		}
 		if !found {
-			return errors.New("model is not advertised by this provider; refresh provider capabilities")
+			return invalid("model is not advertised by this provider; refresh provider capabilities")
 		}
 	}
 	if o.Permission != "" {
@@ -407,7 +407,7 @@ func validateOptions(o AgentOptions, p ProviderSetting) error {
 			found = found || v.ID == o.Permission
 		}
 		if !found {
-			return errors.New("permission mode is not supported by this integration")
+			return invalid("permission mode is not supported by this integration")
 		}
 	}
 	return nil
@@ -436,7 +436,7 @@ func (b *Broker) selection(profile Profile, override AgentOptions) (AgentOptions
 		if selected == (AgentOptions{}) {
 			return selected, nil
 		}
-		return selected, errors.New("selections require configured provider capabilities")
+		return selected, invalid("selections require configured provider capabilities")
 	}
 	b.settings.mu.Lock()
 	inventory, ok := b.settings.inventory[profile.Executable+":"+profile.SHA256]
@@ -445,7 +445,7 @@ func (b *Broker) selection(profile Profile, override AgentOptions) (AgentOptions
 		if selected == (AgentOptions{}) {
 			return selected, nil
 		}
-		return selected, errors.New("refresh provider capabilities before selecting model or permissions")
+		return selected, invalid("refresh provider capabilities before selecting model or permissions")
 	}
 	// Explicit per-session defaults win over native defaults. Defaults are resolved
 	// once into the private session snapshot, not reread on each existing turn.

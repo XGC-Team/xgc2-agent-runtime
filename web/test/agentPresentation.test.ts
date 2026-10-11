@@ -110,6 +110,14 @@ describe('native protocol to migrated T3 presentation', () => {
     expect(approval.detail).toContain('Requested access: /reviewed/assets')
     expect(approval.detail).toContain('Working directory: /reviewed/experiment')
   })
+  it('shows a command cut short by a stopped turn as interrupted, not in doubt', () => {
+    const input = state(); input.worker = 'ready'; input.activeTurnId = ''; input.lastTurnStatus = 'cancelled'
+    input.items = [item({ role: 'tool', status: 'inProgress', turnStatus: 'cancelled' }), item({ id: 'other', role: 'tool', status: 'inProgress', turnStatus: 'unknown' })]
+    const [stopped, lost] = nativeConversationModel(input).items
+    expect(stopped).toMatchObject({ kind: 'work', status: 'Interrupted', tone: 'tool' })
+    expect(lost).toMatchObject({ kind: 'work', status: 'Completion unconfirmed', tone: 'warning' })
+    expect(nativeConversationModel(input, 'zh').items[0]).toMatchObject({ status: '已中断' })
+  })
   it('does not revive an unfinished tool after reconnecting and starting a new turn', () => {
     const input = state(); input.activeTurnId = 'turn-b'
     input.items = [item({ role: 'tool', status: 'inProgress' })]

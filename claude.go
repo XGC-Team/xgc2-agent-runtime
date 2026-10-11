@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
+	"time"
 )
 
 // Legacy callers retain the narrow Read/Glob/Grep stream. Configured providers
@@ -20,7 +22,14 @@ type claudeDriver struct {
 	process       *child
 	cwd           string
 	nativeSession string
-	cancelled     bool
+	// stop is the turn the operator asked to stop, remembered until that
+	// turn's process exists and is stopped.
+	stop string
+	// control is the stdin channel of the running turn's process and sent the
+	// turn whose prompt has been written to it: only then can Claude be asked
+	// to end the turn itself.
+	control *claudeControl
+	sent    string
 }
 
 func (d *claudeDriver) Open(ctx context.Context, cwd, nativeID string) error {
@@ -47,14 +56,20 @@ func (d *claudeDriver) Prompt(ctx context.Context, turn, prompt string) error {
 	if native != "" {
 		args = append(args, "--resume="+native)
 	}
+	if d.stopRequested(turn) {
+		return d.stoppedBeforeStart(turn)
+	}
 	c, err := startChild(ctx, d.profile, args, cwd)
 	if err != nil {
 		return err
 	}
 	d.mu.Lock()
 	d.process = c
-	d.cancelled = false
+	stopped := d.stop == turn
 	d.mu.Unlock()
+	if stopped {
+		go c.Stop()
+	}
 	stop := context.AfterFunc(ctx, func() { c.Stop() })
 	defer stop()
 	// Prompt bytes go through stdin, never the process list.
@@ -82,8 +97,8 @@ func (d *claudeDriver) Prompt(ctx context.Context, turn, prompt string) error {
 	waitErr := c.Wait()
 	d.mu.Lock()
 	d.process = nil
-	cancelled := d.cancelled
-	if decoder.native != "" {
+	cancelled := d.stop == turn
+	if decoder.terminal && decoder.native != "" {
 		d.nativeSession = decoder.native
 	}
 	d.mu.Unlock()
@@ -104,16 +119,51 @@ func (d *claudeDriver) Prompt(ctx context.Context, turn, prompt string) error {
 	}
 	return d.sink(Event{Kind: "turn.end", TurnID: turn, Status: decoder.status, SourceMethod: "claude:result"})
 }
-func (d *claudeDriver) Cancel(ctx context.Context) error {
+
+// Cancel stops the turn's process, or remembers the stop for a turn whose
+// process does not exist yet: Prompt then ends the turn without launching it.
+func (d *claudeDriver) Cancel(_ context.Context, turn string) error {
 	d.mu.Lock()
-	d.cancelled = true
-	p := d.process
+	d.stop = turn
+	p, control, sent := d.process, d.control, d.sent == turn
 	d.mu.Unlock()
-	if p == nil {
-		return ErrStale
+	switch {
+	case p == nil:
+	case control != nil && sent:
+		interruptClaude(control, p)
+	default:
+		go p.Stop()
 	}
-	go p.Stop()
 	return nil
+}
+
+// claudeInterruptGrace is how long Claude gets to end an interrupted turn
+// itself, which saves the turn to its conversation, before its process is stopped.
+const claudeInterruptGrace = 3 * time.Second
+
+// interruptClaude asks Claude to abort the running turn through its control
+// channel (t3code #13999). Killing a first turn before Claude has saved it
+// leaves a conversation that cannot be resumed; a client that does not answer
+// within the grace period is stopped.
+func interruptClaude(control *claudeControl, p *child) {
+	err := control.write(map[string]any{"type": "control_request", "request_id": "xgc-interrupt", "request": map[string]any{"subtype": "interrupt"}})
+	if err != nil {
+		go p.Stop()
+		return
+	}
+	time.AfterFunc(claudeInterruptGrace, p.Stop)
+}
+
+func (d *claudeDriver) stopRequested(turn string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.stop == turn
+}
+
+// stoppedBeforeStart ends a turn the operator stopped before its process
+// started: nothing was sent to the client.
+func (d *claudeDriver) stoppedBeforeStart(turn string) error {
+	return d.sink(Event{Kind: "turn.end", TurnID: turn, Status: "cancelled", SourceMethod: "claude:stop"})
 }
 func (d *claudeDriver) Close() error {
 	d.mu.Lock()
@@ -142,6 +192,23 @@ type claudeDecoder struct {
 	lastTextID    string
 	authFailed    bool
 	rateLimited   bool
+	// identityDue: the conversation id is announced when the turn has ended, the
+	// first time Claude can be sure to have saved it. A turn that dies earlier
+	// leaves no id to resume.
+	identityDue bool
+}
+
+// claudeToolTitle is the heading of a tool call: the tool's name, except that a
+// Skill call names the skill it loads (known once the call's input is complete).
+func claudeToolTitle(name string, input map[string]any) string {
+	if name != "Skill" {
+		return name
+	}
+	skill := []rune(strings.TrimSpace(text(input, "skill")))
+	if len(skill) == 0 {
+		return name
+	}
+	return name + ": " + string(skill[:min(len(skill), 128)])
 }
 
 func (d *claudeDecoder) emit(e Event) error {
@@ -162,9 +229,7 @@ func (d *claudeDecoder) consume(m map[string]any) error {
 		}
 		if d.native == "" {
 			d.native = id
-			if err := d.emit(Event{Kind: "session.identity", AgentSessionID: id}); err != nil {
-				return err
-			}
+			d.identityDue = true
 		}
 	}
 	switch text(m, "type") {
@@ -242,7 +307,7 @@ func (d *claudeDecoder) consume(m map[string]any) error {
 			}
 			if kind == "tool_use" {
 				input, _ := json.Marshal(b["input"])
-				if err := d.emit(Event{Kind: "item.snapshot", ItemID: text(b, "id"), Role: "tool", Title: text(b, "name"), Text: string(input), Status: "running"}); err != nil {
+				if err := d.emit(Event{Kind: "item.snapshot", ItemID: text(b, "id"), Role: "tool", Title: claudeToolTitle(text(b, "name"), obj(b["input"])), Text: string(input), Status: "running"}); err != nil {
 					return err
 				}
 			}
@@ -267,6 +332,12 @@ func (d *claudeDecoder) consume(m map[string]any) error {
 		}
 	case "result":
 		d.terminal = true
+		if d.identityDue {
+			d.identityDue = false
+			if err := d.emit(Event{Kind: "session.identity", AgentSessionID: d.native}); err != nil {
+				return err
+			}
+		}
 		d.status = "failed"
 		if m["is_error"] != true && text(m, "subtype") == "success" {
 			d.status = "completed"

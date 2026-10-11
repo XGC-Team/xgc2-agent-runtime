@@ -15,66 +15,39 @@ import (
 )
 
 type claudeMCPObservation struct {
-	Args        []string       `json:"args"`
-	Config      map[string]any `json:"config"`
-	Path        string         `json:"path"`
-	TokenDigest string         `json:"tokenDigest"`
-	FileMode    uint32         `json:"fileMode"`
-	DirMode     uint32         `json:"dirMode"`
-	Answer      string         `json:"answer"`
+	Args        []string `json:"args"`
+	Name        string   `json:"name"`
+	Type        string   `json:"type"`
+	URL         string   `json:"url"`
+	TokenDigest string   `json:"tokenDigest"`
+	Registered  bool     `json:"registered"`
+	// Leaks name the places the credential must never be found: the arguments and the environment.
+	InArguments   bool   `json:"inArguments"`
+	InEnvironment bool   `json:"inEnvironment"`
+	Answer        string `json:"answer"`
 }
 
-// A real subprocess fixture consumes the same private file and delegated env
-// as Claude, then exercises its native permission control channel. It never
-// calls a model or opens a network connection.
+// A real subprocess fixture plays Claude's stream-json control channel: it takes
+// the host-owned MCP server over mcp_set_servers, as Claude does, and then
+// exercises the native permission control channel. A server named
+// xgc2_unreachable fails to connect; one named xgc2_rejected makes the CLI
+// refuse the registration. It never calls a model or opens a network connection.
 func fixtureClaudeMCP() {
 	args := os.Args[1:]
-	index := slices.Index(args, "--mcp-config")
-	if index < 0 || index+1 >= len(args) || !slices.Contains(args, "--strict-mcp-config") {
+	if slices.Contains(args, "--mcp-config") || !slices.Contains(args, "--strict-mcp-config") {
 		return
 	}
-	path := args[index+1]
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return
-	}
-	var config map[string]any
-	if json.Unmarshal(data, &config) != nil {
-		return
-	}
-	servers := obj(config["mcpServers"])
-	if len(servers) != 1 {
-		return
-	}
-	name := ""
-	for key, value := range servers {
-		name = key
-		server := obj(value)
-		if text(server, "type") != "http" || text(obj(server["headers"]), "Authorization") != "Bearer ${"+mcpBearerEnvironment+"}" {
-			return
-		}
-	}
-	bearer := os.Getenv(mcpBearerEnvironment)
-	if !mcpBearer.MatchString(bearer) || strings.Contains(string(data), bearer) || strings.Contains(strings.Join(args, " "), bearer) {
-		return
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return
-	}
-	directory, err := os.Stat(filepath.Dir(path))
-	if err != nil {
-		return
-	}
-	digest := sha256.Sum256([]byte(bearer))
-	report := claudeMCPObservation{Args: args, Config: config, Path: path, TokenDigest: hex.EncodeToString(digest[:]), FileMode: uint32(info.Mode().Perm()), DirMode: uint32(directory.Mode().Perm())}
 	native := "claude-mcp-fixture"
 	for _, arg := range args {
 		if strings.HasPrefix(arg, "--resume=") {
 			native = strings.TrimPrefix(arg, "--resume=")
 		}
 	}
+	report := claudeMCPObservation{Args: args}
 	send := func(value any) { _ = json.NewEncoder(os.Stdout).Encode(value) }
+	respond := func(id string, subtype string, body map[string]any) {
+		send(map[string]any{"type": "control_response", "response": map[string]any{"subtype": subtype, "request_id": id, "response": body}})
+	}
 	input := map[string]any{"experimentId": "fixture-experiment", "limit": float64(1)}
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
@@ -84,10 +57,44 @@ func fixtureClaudeMCP() {
 		}
 		switch text(message, "type") {
 		case "control_request":
-			send(map[string]any{"type": "control_response", "response": map[string]any{"subtype": "success", "request_id": "xgc-initialize", "response": map[string]any{}}})
+			request := obj(message["request"])
+			id := text(message, "request_id")
+			switch text(request, "subtype") {
+			case "initialize":
+				respond(id, "success", map[string]any{})
+			case "mcp_set_servers":
+				servers := obj(request["servers"])
+				if len(servers) != 1 {
+					return
+				}
+				for name, value := range servers {
+					server := obj(value)
+					authorization := text(obj(server["headers"]), "Authorization")
+					bearer := strings.TrimPrefix(authorization, "Bearer ")
+					if bearer == authorization || !mcpBearer.MatchString(bearer) {
+						return
+					}
+					digest := sha256.Sum256([]byte(bearer))
+					report.Name, report.Type, report.URL, report.TokenDigest = name, text(server, "type"), text(server, "url"), hex.EncodeToString(digest[:])
+					report.InArguments = strings.Contains(strings.Join(args, " "), bearer)
+					report.InEnvironment = strings.Contains(strings.Join(os.Environ(), "\n"), bearer)
+				}
+				report.Registered = true
+				switch report.Name {
+				case "xgc2_rejected":
+					respond(id, "error", nil)
+				case "xgc2_unreachable":
+					respond(id, "success", map[string]any{"added": []string{report.Name}, "removed": []string{}, "errors": map[string]any{report.Name: "ECONNREFUSED"}})
+				default:
+					respond(id, "success", map[string]any{"added": []string{report.Name}, "removed": []string{}, "errors": map[string]any{}})
+				}
+			}
 		case "user":
+			if !report.Registered {
+				return // the prompt must wait for the registration
+			}
 			send(map[string]any{"type": "system", "subtype": "init", "session_id": native})
-			send(map[string]any{"type": "control_request", "request_id": "mcp-permission", "request": map[string]any{"subtype": "can_use_tool", "tool_name": "mcp__" + name + "__xgc2_context", "tool_use_id": "mcp-tool", "input": input}})
+			send(map[string]any{"type": "control_request", "request_id": "mcp-permission", "request": map[string]any{"subtype": "can_use_tool", "tool_name": "mcp__" + report.Name + "__xgc2_context", "tool_use_id": "mcp-tool", "input": input}})
 		case "control_response":
 			response := obj(obj(message["response"])["response"])
 			report.Answer = text(response, "behavior")
@@ -115,7 +122,6 @@ func TestClaudeLocalMCPFreshAndResumeNativeContracts(t *testing.T) {
 		{"plan", AgentOptions{Permission: "plan"}, "deny", "--permission-mode=plan"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
-			previousPath := ""
 			for _, resumed := range []bool{false, true} {
 				server := testLocalMCP()
 				server.Context = &LocalMCPContext{URI: "xgc2://experiments/fixture", Text: `{"application":"XGC2","experiment":{"id":"fixture"}}`}
@@ -156,15 +162,16 @@ func TestClaudeLocalMCPFreshAndResumeNativeContracts(t *testing.T) {
 						}
 					}
 				}
-				if report.Answer != scenario.answer || report.FileMode != 0600 || report.DirMode != 0700 {
-					t.Fatalf("invalid private native launch: %+v", report)
+				if report.Answer != scenario.answer || !report.Registered {
+					t.Fatalf("invalid native launch: %+v", report)
 				}
-				if _, err := os.Stat(filepath.Dir(report.Path)); !os.IsNotExist(err) || report.Path == previousPath {
-					t.Fatal("private runtime configuration retained or reused")
+				// The credential travels over the control channel only: neither the
+				// process list nor the environment every agent command inherits holds it.
+				if report.InArguments || report.InEnvironment || slices.Contains(report.Args, "--mcp-config") || !slices.Contains(report.Args, "--strict-mcp-config") {
+					t.Fatalf("credential or configuration reached the process launch: %+v", report)
 				}
-				previousPath = report.Path
 				digest := sha256.Sum256([]byte(server.BearerToken))
-				if report.TokenDigest != hex.EncodeToString(digest[:]) || text(obj(obj(report.Config["mcpServers"])[server.Name]), "url") != server.URL {
+				if report.TokenDigest != hex.EncodeToString(digest[:]) || report.Name != server.Name || report.Type != "http" || report.URL != server.URL {
 					t.Fatal("native launch did not receive the current binding")
 				}
 				encoded, _ := json.Marshal(events)
@@ -197,8 +204,8 @@ func TestClaudeLocalMCPFreshAndResumeNativeContracts(t *testing.T) {
 	}
 }
 
-func TestClaudeLocalMCPUnsupportedCLIAndFailedStartCleanup(t *testing.T) {
-	for _, help := range []string{"--input-format", "--input-format --mcp-config", "--mcp-config --strict-mcp-config"} {
+func TestClaudeLocalMCPUnsupportedCLIAndFailedStart(t *testing.T) {
+	for _, help := range []string{"--input-format", "--input-format --mcp-config", "--strict-mcp-config"} {
 		path := filepath.Join(t.TempDir(), "old-claude")
 		data := []byte("#!/bin/sh\nprintf '%s\\n' '" + help + "'\n")
 		if err := os.WriteFile(path, data, 0700); err != nil {
@@ -215,24 +222,69 @@ func TestClaudeLocalMCPUnsupportedCLIAndFailedStartCleanup(t *testing.T) {
 		}
 	}
 
-	temporary := t.TempDir()
-	t.Setenv("TMPDIR", temporary)
 	driver := &claudeDriver{profile: Profile{Provider: "claude", Executable: filepath.Join(t.TempDir(), "missing")}}
 	err := driver.PromptWithOptions(withLocalMCP(context.Background(), testLocalMCP()), "turn", "unused", AgentOptions{Permission: "approval-required"})
 	if err == nil {
 		t.Fatal("missing native process unexpectedly started")
 	}
-	entries, err := os.ReadDir(temporary)
-	if err != nil || len(entries) != 0 {
-		t.Fatal("failed launch retained private MCP configuration")
+}
+
+func claudeMCPDriver(t *testing.T, name string, events *[]Event) optionDriver {
+	t.Helper()
+	server := testLocalMCP()
+	server.Name = name
+	driver, err := NewDriverWithLocalMCP(testProfile(t, "claude"), func(event Event) error { *events = append(*events, event); return nil }, func(context.Context, Request) (Answer, error) {
+		return Answer{OptionID: "allow"}, nil
+	}, server)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = driver.Open(testNativeContext(t), t.TempDir(), ""); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = driver.Close() })
+	return driver.(optionDriver)
+}
+
+func TestClaudeLocalMCPServerThatCannotConnectLeavesTheTurnWithoutItsTools(t *testing.T) {
+	var events []Event
+	driver := claudeMCPDriver(t, "xgc2_unreachable", &events)
+	if err := driver.PromptWithOptions(testNativeContext(t), "turn", "inspect the experiment", AgentOptions{Permission: "approval-required"}); err != nil {
+		t.Fatal(err)
+	}
+	var notice *Event
+	for i := range events {
+		if events[i].Kind == "notice" && strings.Contains(events[i].Text, "MCP server could not be reached") {
+			notice = &events[i]
+		}
+	}
+	if notice == nil {
+		t.Fatalf("an unreachable MCP server went unnoticed: %+v", events)
+	}
+	encoded, _ := json.Marshal(events)
+	if strings.Contains(string(encoded), "ECONNREFUSED") || strings.Contains(string(encoded), strings.Repeat("T", 43)) {
+		t.Fatal("the native error text or the credential reached the event history")
+	}
+}
+
+func TestClaudeLocalMCPRejectedRegistrationFailsTheTurnBeforeThePrompt(t *testing.T) {
+	var events []Event
+	driver := claudeMCPDriver(t, "xgc2_rejected", &events)
+	err := driver.PromptWithOptions(testNativeContext(t), "turn", "inspect the experiment", AgentOptions{Permission: "approval-required"})
+	if err == nil || !strings.Contains(err.Error(), "rejected the registration") {
+		t.Fatalf("a refused registration did not fail the turn: %v", err)
+	}
+	for _, event := range events {
+		if event.Role == "assistant" || event.Kind == "turn.end" {
+			t.Fatalf("the prompt was sent although the host's MCP server was refused: %+v", event)
+		}
 	}
 }
 
 func TestClaudeUnboundMCPLaunchPreservesArgs(t *testing.T) {
 	args := []string{"--print", "--permission-mode=plan"}
-	actual, environment, cleanup, err := claudeLocalMCPLaunch(context.Background(), args)
-	cleanup()
-	if err != nil || len(environment) != 0 || !reflect.DeepEqual(args, actual) {
+	actual, servers, err := claudeLocalMCPLaunch(context.Background(), args)
+	if err != nil || servers != nil || !reflect.DeepEqual(args, actual) {
 		t.Fatalf("changed unbound native launch: %v", err)
 	}
 }

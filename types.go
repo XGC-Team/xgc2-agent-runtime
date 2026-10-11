@@ -20,10 +20,6 @@ const Schema = "xgc.agent-runtime/v1"
 const MaxFrame = 4 << 20
 const MaxText = 256 << 10
 
-var ErrConflict = errors.New("request identity conflict")
-var ErrUnavailable = errors.New("agent runtime unavailable")
-var ErrNotFound = errors.New("session not found")
-var ErrStale = errors.New("request is no longer pending")
 var safeID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,95}$`)
 var digest = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
@@ -100,7 +96,7 @@ func commandArgs(provider string) ([]string, error) {
 	case "claude":
 		return []string{"--print", "--verbose", "--output-format", "stream-json", "--include-partial-messages", "--tools", "Read,Glob,Grep", "--allowedTools", "Read,Glob,Grep"}, nil
 	default:
-		return nil, errors.New("unsupported provider")
+		return nil, invalid("unsupported provider")
 	}
 }
 func checkExecutable(p Profile) error {
@@ -118,7 +114,7 @@ func checkExecutable(p Profile) error {
 	defer f.Close()
 	h := sha256.New()
 	if _, err = io.Copy(h, f); err != nil || hex.EncodeToString(h.Sum(nil)) != p.SHA256 {
-		return errors.New("executable digest mismatch")
+		return classified{ErrUnavailable, "executable digest mismatch"}
 	}
 	return nil
 }
@@ -190,23 +186,23 @@ type Answer struct {
 func (r Request) ValidateAnswer(a Answer) error {
 	if a.Cancel {
 		if a.OptionID != "" || len(a.Answers) > 0 {
-			return errors.New("cancel cannot contain answers")
+			return invalid("cancel cannot contain answers")
 		}
 		return nil
 	}
 	if len(r.Questions) > 0 {
 		if a.OptionID != "" || len(a.Answers) != len(r.Questions) {
-			return errors.New("answer every requested question")
+			return invalid("answer every requested question")
 		}
 		for _, q := range r.Questions {
 			values, ok := a.Answers[q.ID]
 			if !ok || len(values) == 0 || len(values) > 32 || (!q.Multiple && len(values) != 1) {
-				return errors.New("invalid question answer")
+				return invalid("invalid question answer")
 			}
 			seen := map[string]bool{}
 			for _, v := range values {
 				if v == "" || len(v) > 8192 || seen[v] {
-					return errors.New("invalid answer value")
+					return invalid("invalid answer value")
 				}
 				seen[v] = true
 				if !q.FreeText {
@@ -217,7 +213,7 @@ func (r Request) ValidateAnswer(a Answer) error {
 						}
 					}
 					if !found {
-						return errors.New("answer is not an offered option")
+						return invalid("answer is not an offered option")
 					}
 				}
 			}
@@ -225,14 +221,14 @@ func (r Request) ValidateAnswer(a Answer) error {
 		return nil
 	}
 	if len(a.Answers) > 0 {
-		return errors.New("unexpected question answers")
+		return invalid("unexpected question answers")
 	}
 	for _, o := range r.Options {
 		if o.ID == a.OptionID {
 			return nil
 		}
 	}
-	return errors.New("select an offered decision")
+	return invalid("select an offered decision")
 }
 
 // Event is a presentation record, never a product judgement or trusted model receipt.
@@ -284,7 +280,7 @@ type Create struct {
 
 func (c Create) Validate() error {
 	if !safeID.MatchString(c.ProfileID) || !safeID.MatchString(c.Context.Kind) || !safeID.MatchString(c.Context.ID) || !safeID.MatchString(c.Workspace.ID) || c.Workspace.Revision == "" || len(c.Workspace.Revision) > 256 || strings.ContainsAny(c.Workspace.Revision, "\x00\r\n") || !c.AgentAccessConfirmed {
-		return errors.New("a profile, typed context, reviewed workspace revision, and access confirmation are required")
+		return invalid("a profile, typed context, reviewed workspace revision, and access confirmation are required")
 	}
 	return nil
 }
@@ -307,10 +303,19 @@ type Session struct {
 }
 type Sink func(Event) error
 type Ask func(context.Context, Request) (Answer, error)
+
+// Driver speaks one native client's protocol. Open starts or resumes the native
+// session; Prompt runs one turn and returns after the turn's terminal event.
+//
+// Cancel asks the native client to stop the named turn and returns once the
+// request is accepted: a turn the client has not acknowledged yet, or that
+// Prompt has not started, is stopped as soon as it starts, so a Stop is never
+// lost to that race. An error means the stop was not accepted and the turn
+// keeps running. A turn that is not current is ErrStale.
 type Driver interface {
 	Open(context.Context, string, string) error
 	Prompt(context.Context, string, string) error
-	Cancel(context.Context) error
+	Cancel(context.Context, string) error
 	Close() error
 }
 type Factory func(Profile, Sink, Ask) (Driver, error)

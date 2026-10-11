@@ -49,7 +49,7 @@ describe('persisted native prompt options replay', () => {
   it('detects changed selections on a repeated event sequence', () => {
     const state = applyEvent(beforeReceipt(), receipt)
     expect(() => applyEvent(state, typedReceipt({ details: { type: 'userMessage', providerOptions: { ...providerOptions, effort: 'low' } } })))
-      .toThrow('同一事件序号出现不同内容')
+      .toThrow('The same event sequence number appeared with different content')
   })
 
   it('keeps prompts without explicit selections valid without inventing metadata', () => {

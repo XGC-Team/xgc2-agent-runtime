@@ -45,22 +45,6 @@
             "promptInjectedValues": [
               "ultrathink"
             ]
-          },
-          {
-            "id": "contextWindow",
-            "label": "Context Window",
-            "type": "select",
-            "options": [
-              {
-                "id": "200k",
-                "label": "200k"
-              },
-              {
-                "id": "1m",
-                "label": "1M",
-                "isDefault": true
-              }
-            ]
           }
         ]
       },
@@ -70,15 +54,67 @@
             "ultracode": "xhigh",
             "ultrathink": null
           },
-          "modelSuffixes": {
-            "contextWindow": {
-              "1m": "[1m]"
-            }
+          "fixedContextWindowTokens": 1000000
+        }
+      }
+    },
+    "opus-5-5": {
+      "capabilities": {
+        "optionDescriptors": [
+          {
+            "id": "effort",
+            "label": "Reasoning",
+            "type": "select",
+            "options": [
+              {
+                "id": "low",
+                "label": "Low"
+              },
+              {
+                "id": "medium",
+                "label": "Medium",
+                "isDefault": true
+              },
+              {
+                "id": "high",
+                "label": "High"
+              },
+              {
+                "id": "xhigh",
+                "label": "Extra High"
+              },
+              {
+                "id": "max",
+                "label": "Max"
+              },
+              {
+                "id": "ultracode",
+                "label": "Ultracode",
+                "description": "xhigh effort plus multi-agent workflow orchestration"
+              },
+              {
+                "id": "ultrathink",
+                "label": "Ultrathink"
+              }
+            ],
+            "promptInjectedValues": [
+              "ultrathink"
+            ]
           },
-          "contextWindowTokens": {
-            "200k": 200000,
-            "1m": 1000000
+          {
+            "id": "fastMode",
+            "label": "Fast Mode",
+            "type": "boolean"
           }
+        ]
+      },
+      "adapter": {
+        "claudeCode": {
+          "effortMap": {
+            "ultracode": "xhigh",
+            "ultrathink": null
+          },
+          "fixedContextWindowTokens": 1000000
         }
       }
     },
@@ -129,22 +165,6 @@
             "id": "fastMode",
             "label": "Fast Mode",
             "type": "boolean"
-          },
-          {
-            "id": "contextWindow",
-            "label": "Context Window",
-            "type": "select",
-            "options": [
-              {
-                "id": "200k",
-                "label": "200k"
-              },
-              {
-                "id": "1m",
-                "label": "1M",
-                "isDefault": true
-              }
-            ]
           }
         ]
       },
@@ -154,15 +174,7 @@
             "ultracode": "xhigh",
             "ultrathink": null
           },
-          "modelSuffixes": {
-            "contextWindow": {
-              "1m": "[1m]"
-            }
-          },
-          "contextWindowTokens": {
-            "200k": 200000,
-            "1m": 1000000
-          }
+          "fixedContextWindowTokens": 1000000
         }
       }
     },
@@ -390,7 +402,9 @@
         ]
       },
       "adapter": {
-        "claudeCode": {}
+        "claudeCode": {
+          "fixedContextWindowTokens": 200000
+        }
       }
     },
     "sonnet-5": {
@@ -430,22 +444,6 @@
             "promptInjectedValues": [
               "ultrathink"
             ]
-          },
-          {
-            "id": "contextWindow",
-            "label": "Context Window",
-            "type": "select",
-            "options": [
-              {
-                "id": "200k",
-                "label": "200k",
-                "isDefault": true
-              },
-              {
-                "id": "1m",
-                "label": "1M"
-              }
-            ]
           }
         ]
       },
@@ -454,15 +452,7 @@
           "effortMap": {
             "ultrathink": null
           },
-          "modelSuffixes": {
-            "contextWindow": {
-              "1m": "[1m]"
-            }
-          },
-          "contextWindowTokens": {
-            "200k": 200000,
-            "1m": 1000000
-          }
+          "fixedContextWindowTokens": 1000000
         }
       }
     },
@@ -536,6 +526,55 @@
         }
       }
     },
+    "haiku-5-5": {
+      "capabilities": {
+        "optionDescriptors": [
+          {
+            "id": "effort",
+            "label": "Reasoning",
+            "type": "select",
+            "options": [
+              {
+                "id": "low",
+                "label": "Low"
+              },
+              {
+                "id": "medium",
+                "label": "Medium",
+                "isDefault": true
+              },
+              {
+                "id": "high",
+                "label": "High"
+              },
+              {
+                "id": "xhigh",
+                "label": "Extra High"
+              },
+              {
+                "id": "max",
+                "label": "Max"
+              },
+              {
+                "id": "ultrathink",
+                "label": "Ultrathink"
+              }
+            ],
+            "promptInjectedValues": [
+              "ultrathink"
+            ]
+          }
+        ]
+      },
+      "adapter": {
+        "claudeCode": {
+          "effortMap": {
+            "ultrathink": null
+          },
+          "fixedContextWindowTokens": 1000000
+        }
+      }
+    },
     "haiku-4-5": {
       "capabilities": {
         "optionDescriptors": [
@@ -547,11 +586,45 @@
         ]
       },
       "adapter": {
-        "claudeCode": {}
+        "claudeCode": {
+          "fixedContextWindowTokens": 200000
+        }
       }
     }
   },
   "models": [
+    {
+      "slug": "claude-opus-5-5",
+      "name": "Claude Opus 5.5",
+      "aliases": [
+        "opus",
+        "opus-5.5",
+        "claude-opus-5.5"
+      ],
+      "status": "current",
+      "profile": "opus-5-5",
+      "adapter": {
+        "claudeCode": {
+          "minVersion": "2.1.280"
+        }
+      }
+    },
+    {
+      "slug": "claude-sonnet-5-5",
+      "name": "Claude Sonnet 5.5",
+      "aliases": [
+        "sonnet",
+        "sonnet-5.5",
+        "claude-sonnet-5.5"
+      ],
+      "status": "current",
+      "profile": "sonnet-5",
+      "adapter": {
+        "claudeCode": {
+          "minVersion": "2.1.284"
+        }
+      }
+    },
     {
       "slug": "claude-fable-5-1",
       "name": "Claude Fable 5.1",
@@ -561,7 +634,6 @@
         "claude-fable-5.1"
       ],
       "status": "current",
-      "badge": "new",
       "profile": "fable-5",
       "adapter": {
         "claudeCode": {
@@ -584,12 +656,11 @@
       "slug": "claude-opus-5",
       "name": "Claude Opus 5",
       "aliases": [
-        "opus",
         "opus-5",
         "claude-opus-5.0",
         "claude-opus-5-0"
       ],
-      "status": "current",
+      "status": "legacy",
       "profile": "opus-5",
       "adapter": {
         "claudeCode": {
@@ -648,12 +719,11 @@
       "slug": "claude-sonnet-5",
       "name": "Claude Sonnet 5",
       "aliases": [
-        "sonnet",
         "sonnet-5",
         "claude-sonnet-5.0",
         "claude-sonnet-5-0"
       ],
-      "status": "current",
+      "status": "legacy",
       "profile": "sonnet-5"
     },
     {
@@ -668,10 +738,26 @@
       "profile": "sonnet-4-6"
     },
     {
+      "slug": "claude-haiku-5-5",
+      "name": "Claude Haiku 5.5",
+      "aliases": [
+        "haiku",
+        "haiku-5.5",
+        "claude-haiku-5.5"
+      ],
+      "status": "current",
+      "badge": "new",
+      "profile": "haiku-5-5",
+      "adapter": {
+        "claudeCode": {
+          "minVersion": "2.1.293"
+        }
+      }
+    },
+    {
       "slug": "claude-haiku-4-5",
       "name": "Claude Haiku 4.5",
       "aliases": [
-        "haiku",
         "haiku-4.5",
         "claude-haiku-4.5",
         "claude-haiku-4-5-20251001"

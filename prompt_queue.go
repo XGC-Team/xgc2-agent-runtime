@@ -1,7 +1,7 @@
 package agentruntime
 
 import (
-	"errors"
+	"context"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -65,58 +65,78 @@ func (s *liveSession) applyQueueEventLocked(e Event) {
 		}
 	}
 }
-func (b *Broker) Queue(id, key string, c QueueCommand) (PromptQueue, error) {
+func (b *Broker) Queue(_ context.Context, id, key string, c QueueCommand) (PromptQueue, error) {
 	if err := validKey(key); err != nil {
 		return PromptQueue{}, err
 	}
+	s, err := b.open(id)
+	if err != nil {
+		return PromptQueue{}, err
+	}
+	turn := turnIdentity(id, key)
+	if c.Operation == "enqueue" {
+		if !validQueuedText(c.Text) {
+			return PromptQueue{}, invalid("prompt must be nonempty UTF-8 up to 128 KiB")
+		}
+		// A message that already became a turn is not queued again.
+		if replayed, err := s.replayedTurn(turn, promptFingerprint(c.Text, c.Options)); err != nil {
+			return PromptQueue{}, err
+		} else if replayed {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			return cloneQueue(s.queue), nil
+		}
+	}
+	queue, seq, err := b.applyQueue(s, turn, c)
+	if err != nil {
+		return PromptQueue{}, err
+	}
+	// The command is acknowledged once the queue it produced is on disk.
+	if err = s.waitDurable(context.Background(), seq); err != nil {
+		return PromptQueue{}, err
+	}
+	return queue, nil
+}
+
+// applyQueue applies one queue command under the locks, without storage access.
+// It returns the queue and the sequence number its change is journaled at.
+func (b *Broker) applyQueue(s *liveSession, turn string, c QueueCommand) (PromptQueue, uint64, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.closed {
-		return PromptQueue{}, ErrUnavailable
-	}
-	s := b.sessions[id]
-	if s == nil {
-		return PromptQueue{}, ErrNotFound
+		return PromptQueue{}, 0, ErrUnavailable
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.info.Archived {
-		return PromptQueue{}, ErrUnavailable
+		return PromptQueue{}, 0, ErrUnavailable
 	}
 	q := cloneQueue(s.queue)
 	if c.Operation != "enqueue" && c.ExpectedRevision != q.Revision {
-		return PromptQueue{}, ErrConflict
+		return PromptQueue{}, 0, ErrConflict
 	}
 	switch c.Operation {
 	case "enqueue":
-		if !validQueuedText(c.Text) {
-			return PromptQueue{}, errors.New("prompt must be nonempty UTF-8 up to 128 KiB")
-		}
-		turn := "t_" + hash(id + "\x00" + key)[:32]
 		for _, p := range q.Items {
 			if p.ID == turn {
 				if p.Text != c.Text || p.RequestOptions != c.Options {
-					return PromptQueue{}, ErrConflict
+					return PromptQueue{}, 0, ErrConflict
 				}
-				return q, nil
+				return q, s.info.LastSeq, nil
 			}
 		}
-		fingerprint, found, err := s.findTurnLocked(turn)
-		if err != nil {
-			return PromptQueue{}, err
-		}
-		if found {
-			if fingerprint != promptFingerprint(c.Text, c.Options) {
-				return PromptQueue{}, ErrConflict
+		if known, ok := s.turns[turn]; ok { // dispatched while this command waited for the locks
+			if known.fingerprint != promptFingerprint(c.Text, c.Options) {
+				return PromptQueue{}, 0, ErrConflict
 			}
-			return q, nil
+			return q, s.info.LastSeq, nil
 		}
 		if len(q.Items) >= maxQueuedPrompts {
-			return PromptQueue{}, errors.New("message queue is full")
+			return PromptQueue{}, 0, exhausted("message queue is full")
 		}
 		selected, err := b.selection(s.profile, c.Options)
 		if err != nil {
-			return PromptQueue{}, err
+			return PromptQueue{}, 0, err
 		}
 		if s.driver == nil || s.info.State == "disconnected" || s.info.State == "closed" {
 			q.Paused = true
@@ -131,11 +151,11 @@ func (b *Broker) Queue(id, key string, c QueueCommand) (PromptQueue, error) {
 			}
 		}
 		if index < 0 {
-			return PromptQueue{}, ErrNotFound
+			return PromptQueue{}, 0, classified{ErrNotFound, "queued message not found"}
 		}
 		if c.Operation == "edit" {
 			if !validQueuedText(c.Text) {
-				return PromptQueue{}, errors.New("invalid queued message")
+				return PromptQueue{}, 0, invalid("invalid queued message")
 			}
 			q.Items[index].Text = c.Text
 		} else {
@@ -143,7 +163,7 @@ func (b *Broker) Queue(id, key string, c QueueCommand) (PromptQueue, error) {
 		}
 	case "reorder":
 		if len(c.Order) != len(q.Items) {
-			return PromptQueue{}, ErrConflict
+			return PromptQueue{}, 0, ErrConflict
 		}
 		byID := map[string]QueuedPrompt{}
 		for _, p := range q.Items {
@@ -153,7 +173,7 @@ func (b *Broker) Queue(id, key string, c QueueCommand) (PromptQueue, error) {
 		for _, id := range c.Order {
 			p, ok := byID[id]
 			if !ok {
-				return PromptQueue{}, ErrConflict
+				return PromptQueue{}, 0, ErrConflict
 			}
 			reordered = append(reordered, p)
 			delete(byID, id)
@@ -163,17 +183,18 @@ func (b *Broker) Queue(id, key string, c QueueCommand) (PromptQueue, error) {
 		q.Paused = true
 	case "resume":
 		if s.driver == nil || s.info.State == "disconnected" || s.info.State == "closed" {
-			return PromptQueue{}, ErrUnavailable
+			return PromptQueue{}, 0, ErrUnavailable
 		}
 		q.Paused = false
 	default:
-		return PromptQueue{}, errors.New("unknown queue operation")
+		return PromptQueue{}, 0, invalid("unknown queue operation")
 	}
 	if err := s.writeQueueLocked(q); err != nil {
-		return PromptQueue{}, err
+		return PromptQueue{}, 0, err
 	}
+	seq := s.info.LastSeq
 	b.drainQueueLocked(s)
-	return cloneQueue(s.queue), nil
+	return cloneQueue(s.queue), seq, nil
 }
 func (b *Broker) drainQueue(id string) {
 	b.mu.Lock()
@@ -194,6 +215,7 @@ func (b *Broker) drainQueueLocked(s *liveSession) {
 		return
 	}
 	p := s.queue.Items[0]
+	// The turn's worker reports a failure to commit the message itself.
 	if _, err := b.startPromptLocked(s, p.ID, p.Text, p.RequestOptions, p.Options); err != nil {
 		s.pauseQueueLocked()
 		return

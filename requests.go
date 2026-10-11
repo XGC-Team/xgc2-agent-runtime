@@ -2,6 +2,7 @@ package agentruntime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 )
@@ -67,6 +68,17 @@ func (d *rpcDriver) onRequest(ctx context.Context, method string, p map[string]a
 			}
 			r.Options = options
 		}
+	case "item/permissions/requestApproval":
+		// The client may grant exactly the profile it was shown, or nothing.
+		profile := obj(p["permissions"])
+		summary := codexPermissionSummary(profile)
+		if summary == "" {
+			return nil, errors.New("permission request without a reviewable profile")
+		}
+		r.Title = "Permission request"
+		r.Details = &RequestDetails{Cwd: text(p, "cwd"), Reason: text(p, "reason")}
+		r.Text = summary + "\n" + text(p, "reason")
+		r.Options = []Option{{ID: "accept", Label: "Grant these permissions", Kind: "allow_once"}, {ID: "decline", Label: "Decline", Kind: "reject_once"}}
 	case "item/tool/requestUserInput", "tool/requestUserInput":
 		r.Kind = "question"
 		r.Title = "Input needed"
@@ -138,6 +150,13 @@ func (d *rpcDriver) onRequest(ctx context.Context, method string, p map[string]a
 			decision = "cancel"
 		}
 		return map[string]any{"decision": decision}, nil
+	case "item/permissions/requestApproval":
+		// Granting is for the turn only; declining answers with an empty grant,
+		// which the client reads as the permission withheld.
+		if answer.Cancel || answer.OptionID != "accept" {
+			return map[string]any{"permissions": map[string]any{}}, nil
+		}
+		return map[string]any{"permissions": obj(p["permissions"]), "scope": "turn"}, nil
 	case "cursor/create_plan":
 		outcome := answer.OptionID
 		if answer.Cancel {
@@ -210,4 +229,91 @@ func validateRequest(r Request) error {
 		}
 	}
 	return nil
+}
+
+// codexPermissionSummary lists what a Codex permission profile would grant, for
+// the operator to review. It is empty when the profile names nothing, or
+// anything the summary cannot show: a grant is never wider than what was read.
+func codexPermissionSummary(profile map[string]any) string {
+	if !onlyKeys(profile, "network", "fileSystem") {
+		return ""
+	}
+	lines := []string{}
+	if raw, present := profile["network"]; present && raw != nil {
+		network := obj(raw)
+		enabled, ok := network["enabled"].(bool)
+		if network == nil || !onlyKeys(network, "enabled") || (!ok && network["enabled"] != nil) {
+			return ""
+		}
+		if ok {
+			state := "disabled"
+			if enabled {
+				state = "enabled"
+			}
+			lines = append(lines, "Network access: "+state)
+		}
+	}
+	if raw, present := profile["fileSystem"]; present && raw != nil {
+		files := obj(raw)
+		if files == nil || !onlyKeys(files, "entries", "read", "write", "globScanMaxDepth") {
+			return ""
+		}
+		for _, access := range []string{"read", "write"} {
+			values, present := files[access]
+			if !present || values == nil {
+				continue
+			}
+			list, ok := values.([]any)
+			if !ok {
+				return ""
+			}
+			var paths []string
+			for _, v := range list {
+				path, ok := v.(string)
+				if !ok || path == "" {
+					return ""
+				}
+				paths = append(paths, path)
+			}
+			if len(paths) > 0 {
+				lines = append(lines, strings.ToUpper(access[:1])+access[1:]+": "+strings.Join(paths, ", "))
+			}
+		}
+		entries, _ := files["entries"].([]any)
+		if len(entries) > 64 {
+			return ""
+		}
+		for _, raw := range entries {
+			entry, path := obj(raw), obj(obj(raw)["path"])
+			target := ""
+			switch text(path, "type") {
+			case "path":
+				target = text(path, "path")
+			case "glob_pattern":
+				target = text(path, "pattern")
+			case "special":
+				encoded, _ := json.Marshal(path["value"])
+				target = string(encoded)
+			}
+			if access := text(entry, "access"); target == "" || (access != "read" && access != "write" && access != "deny") {
+				return ""
+			}
+			lines = append(lines, "File access ("+text(entry, "access")+"): "+target)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// onlyKeys reports whether m has no key other than the listed ones.
+func onlyKeys(m map[string]any, keys ...string) bool {
+	for key := range m {
+		known := false
+		for _, k := range keys {
+			known = known || k == key
+		}
+		if !known {
+			return false
+		}
+	}
+	return true
 }

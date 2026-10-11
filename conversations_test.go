@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -41,10 +40,14 @@ func (d *conversationDriver) Prompt(ctx context.Context, turn, prompt string) er
 	}
 	return d.sink(Event{Kind: "turn.end", TurnID: turn, Status: "completed"})
 }
-func (d *conversationDriver) Cancel(context.Context) error { return nil }
-func (d *conversationDriver) Close() error                 { d.closed.Store(true); return nil }
+func (d *conversationDriver) Cancel(context.Context, string) error { return nil }
+func (d *conversationDriver) Close() error                         { d.closed.Store(true); return nil }
 
 func conversationBroker(t *testing.T, firstOpenFails bool) (*Broker, Profile, Factory) {
+	return conversationBrokerOn(t, firstOpenFails, testStorage(t))
+}
+
+func conversationBrokerOn(t *testing.T, firstOpenFails bool, store *Store) (*Broker, Profile, Factory) {
 	t.Helper()
 	root := t.TempDir()
 	program := []byte("fixture: never execute\n")
@@ -58,7 +61,7 @@ func conversationBroker(t *testing.T, firstOpenFails bool) (*Broker, Profile, Fa
 	factory := func(_ Profile, sink Sink, ask Ask) (Driver, error) {
 		return &conversationDriver{sink: sink, ask: ask, fail: firstOpenFails && builds.Add(1) == 1}, nil
 	}
-	b, err := NewBroker(testStorage(t), []Profile{profile}, func(context.Context, Create, string, bool) (string, error) { return root, nil }, factory)
+	b, err := NewBroker(store, []Profile{profile}, func(context.Context, Create, string, bool) (string, error) { return root, nil }, factory)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +76,7 @@ func createConversation(t *testing.T, b *Broker, key string) Session {
 		t.Fatal(err)
 	}
 	waitState(t, b, s.ID, "ready")
-	s, _ = b.Get(s.ID)
+	s, _ = b.Get(bg, s.ID)
 	return s
 }
 
@@ -81,14 +84,14 @@ func TestConversationMetadataArchiveAndResumeKeepIdentity(t *testing.T) {
 	b, profile, factory := conversationBroker(t, false)
 	s := createConversation(t, b, "first")
 	title, archive := "运行前检查", true
-	updated, err := b.UpdateMetadata(s.ID, MetadataUpdate{ExpectedRevision: 1, Title: &title, Archived: &archive})
+	updated, err := b.UpdateMetadata(bg, s.ID, MetadataUpdate{ExpectedRevision: 1, Title: &title, Archived: &archive})
 	if err != nil || !updated.Archived || updated.Title != title || updated.State != "closed" || updated.MetadataRevision != 2 {
 		t.Fatalf("archive=%+v %v", updated, err)
 	}
-	if err = b.Reconnect(s.ID); !errors.Is(err, ErrConflict) {
+	if err = b.Reconnect(bg, s.ID); !errors.Is(err, ErrConflict) {
 		t.Fatalf("archived resume=%v", err)
 	}
-	if _, err = b.UpdateMetadata(s.ID, MetadataUpdate{ExpectedRevision: 1, Title: &title}); !errors.Is(err, ErrConflict) {
+	if _, err = b.UpdateMetadata(bg, s.ID, MetadataUpdate{ExpectedRevision: 1, Title: &title}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("stale metadata=%v", err)
 	}
 	if len(b.sessions[s.ID].turns) > 0 || len(b.sessions[s.ID].inputs) > 0 {
@@ -100,26 +103,26 @@ func TestConversationMetadataArchiveAndResumeKeepIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer restored.Close()
-	restoredInfo, _ := restored.Get(s.ID)
+	restoredInfo, _ := restored.Get(bg, s.ID)
 	if restoredInfo.ID != s.ID || restoredInfo.AgentSessionID != s.AgentSessionID || restoredInfo.RuntimeID != s.RuntimeID || restoredInfo.Title != title || !restoredInfo.Archived {
 		t.Fatalf("restored=%+v", restoredInfo)
 	}
 	archive = false
-	if _, err = restored.UpdateMetadata(s.ID, MetadataUpdate{ExpectedRevision: 2, Archived: &archive}); err != nil {
+	if _, err = restored.UpdateMetadata(bg, s.ID, MetadataUpdate{ExpectedRevision: 2, Archived: &archive}); err != nil {
 		t.Fatal(err)
 	}
-	if err = restored.Reconnect(s.ID); err != nil {
+	if err = restored.Reconnect(bg, s.ID); err != nil {
 		t.Fatal(err)
 	}
 	waitState(t, restored, s.ID, "ready")
-	resumed, _ := restored.Get(s.ID)
+	resumed, _ := restored.Get(bg, s.ID)
 	if resumed.ID != s.ID || resumed.RuntimeID == s.RuntimeID || resumed.AgentSessionID != s.AgentSessionID || resumed.Archived {
 		t.Fatalf("resumed=%+v", resumed)
 	}
-	if err = restored.CloseSession(s.ID); err != nil {
+	if err = restored.CloseSession(bg, s.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err = restored.Reconnect(s.ID); err != nil {
+	if err = restored.Reconnect(bg, s.ID); err != nil {
 		t.Fatal(err)
 	}
 	waitState(t, restored, s.ID, "ready")
@@ -132,15 +135,15 @@ func TestInitialOpenFailureCanExplicitlyRetrySameConversation(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitState(t, b, s.ID, "disconnected")
-	failed, _ := b.Get(s.ID)
+	failed, _ := b.Get(bg, s.ID)
 	if failed.AgentSessionID != "" {
 		t.Fatal("failed open fabricated native identity")
 	}
-	if err = b.Reconnect(s.ID); err != nil {
+	if err = b.Reconnect(bg, s.ID); err != nil {
 		t.Fatal(err)
 	}
 	waitState(t, b, s.ID, "ready")
-	retried, _ := b.Get(s.ID)
+	retried, _ := b.Get(bg, s.ID)
 	if retried.ID != s.ID || retried.RuntimeID == failed.RuntimeID || retried.AgentSessionID == "" {
 		t.Fatalf("retry=%+v", retried)
 	}
@@ -158,7 +161,7 @@ func TestMetadataRevisionSerializesConcurrentEditors(t *testing.T) {
 		group.Add(1)
 		go func(title string) {
 			defer group.Done()
-			_, err := b.UpdateMetadata(s.ID, MetadataUpdate{ExpectedRevision: 1, Title: &title})
+			_, err := b.UpdateMetadata(bg, s.ID, MetadataUpdate{ExpectedRevision: 1, Title: &title})
 			if err == nil {
 				success.Add(1)
 			} else if errors.Is(err, ErrConflict) {
@@ -178,7 +181,7 @@ func TestClosedHistoryDoesNotConsumeWorkerCapacityAndPagesStayScoped(t *testing.
 	b, profile, factory := conversationBroker(t, false)
 	for i := 0; i < MaxSessions+2; i++ {
 		s := createConversation(t, b, fmt.Sprintf("history-%03d", i))
-		if err := b.CloseSession(s.ID); err != nil {
+		if err := b.CloseSession(bg, s.ID); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -203,7 +206,7 @@ func TestClosedHistoryDoesNotConsumeWorkerCapacityAndPagesStayScoped(t *testing.
 	seen := map[string]bool{}
 	cursor := ""
 	for {
-		page, err := restored.ListPage(SessionListOptions{Limit: 17, After: cursor, Context: scope("fixture").Context})
+		page, err := restored.List(bg, SessionListOptions{Limit: 17, After: cursor, Context: scope("fixture").Context})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -224,7 +227,7 @@ func TestClosedHistoryDoesNotConsumeWorkerCapacityAndPagesStayScoped(t *testing.
 	if len(seen) != MaxSessions+2 {
 		t.Fatalf("history count=%d", len(seen))
 	}
-	if _, err := restored.ListPage(SessionListOptions{Limit: 101}); err == nil {
+	if _, err := restored.List(bg, SessionListOptions{Limit: 101}); err == nil {
 		t.Fatal("unbounded page accepted")
 	}
 	createConversation(t, restored, "new-after-history")
@@ -242,7 +245,7 @@ func TestWorkerCapacityIsStillEnforced(t *testing.T) {
 	if _, err := b.Create(context.Background(), "over-capacity", scope("fixture")); err == nil {
 		t.Fatal("active capacity was bypassed")
 	}
-	if err := b.CloseSession(first); err != nil {
+	if err := b.CloseSession(bg, first); err != nil {
 		t.Fatal(err)
 	}
 	createConversation(t, b, "reclaimed-slot")
@@ -255,16 +258,16 @@ func TestDecisionAuditAndGlobalAttentionRemainSeparateFromFreeText(t *testing.T)
 		answer  Answer
 		outcome string
 	}{{Answer{OptionID: "yes"}, "allow"}, {Answer{OptionID: "no"}, "deny"}, {Answer{Cancel: true}, "cancel"}} {
-		if _, err := b.Prompt(s.ID, fmt.Sprintf("prompt-%d", index), "request fixture"); err != nil {
+		if _, err := b.Prompt(bg, s.ID, fmt.Sprintf("prompt-%d", index), PromptRequest{Text: "request fixture"}); err != nil {
 			t.Fatal(err)
 		}
 		waitState(t, b, s.ID, "awaiting-input")
-		pending, err := b.Inputs(s.ID)
+		pending, err := b.Inputs(bg, s.ID)
 		if err != nil || len(pending) != 1 {
 			t.Fatalf("pending=%+v %v", pending, err)
 		}
 		request := pending[0].Request
-		attention := b.Attention()
+		attention, _ := b.Attention(bg)
 		if len(attention.Sessions) != 1 || len(attention.Sessions[0].Pending) != 1 || attention.Sessions[0].Pending[0].ID != request.ID {
 			t.Fatalf("attention=%+v", attention)
 		}
@@ -272,15 +275,15 @@ func TestDecisionAuditAndGlobalAttentionRemainSeparateFromFreeText(t *testing.T)
 		if strings.Contains(string(data), "sensitive request detail") {
 			t.Fatal("attention copied original request text")
 		}
-		inputs, err := b.Inputs(s.ID)
+		inputs, err := b.Inputs(bg, s.ID)
 		if err != nil || len(inputs) != 1 || inputs[0].Request.Text != "sensitive request detail" {
 			t.Fatalf("inputs=%+v %v", inputs, err)
 		}
 		ctx := WithDecisionPolicy(WithDecisionActor(context.Background(), DecisionActor{ID: "station-user", Label: "Operator"}), DecisionPolicy{ID: "manual", Revision: "r1"})
-		if err = b.AnswerContext(ctx, s.ID, request.ID, test.answer); err != nil {
+		if err = b.Answer(ctx, s.ID, request.ID, test.answer); err != nil {
 			t.Fatal(err)
 		}
-		if err = b.AnswerContext(ctx, s.ID, request.ID, test.answer); err != nil {
+		if err = b.Answer(ctx, s.ID, request.ID, test.answer); err != nil {
 			t.Fatalf("duplicate answer=%v", err)
 		}
 		waitState(t, b, s.ID, "ready")
@@ -291,7 +294,7 @@ func TestDecisionAuditAndGlobalAttentionRemainSeparateFromFreeText(t *testing.T)
 		t.Fatal(err)
 	}
 	defer restored.Close()
-	events, _, err := restored.Replay(s.ID, 0)
+	events, _, err := restored.replay(s.ID, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,36 +317,28 @@ func TestDecisionAuditAndGlobalAttentionRemainSeparateFromFreeText(t *testing.T)
 	}
 }
 
-func TestConversationHTTPRejectsForgedActorAndSupportsAttentionETag(t *testing.T) {
+func TestConversationServiceRejectsForgedActorAndPagesConversations(t *testing.T) {
 	b, _, _ := conversationBroker(t, false)
 	s := createConversation(t, b, "http")
-	mux := http.NewServeMux()
-	if err := RegisterRoutes(mux, b, "/native"); err != nil {
-		t.Fatal(err)
-	}
-	call := func(method, path, body, etag string) *httptest.ResponseRecorder {
-		r := httptest.NewRequest(method, "http://127.0.0.1"+path, strings.NewReader(body))
-		r.RemoteAddr = "127.0.0.1:1234"
-		r.Header.Set(ClientHeader, "1")
+	handler := Handler(b, HandlerOptions{})
+	call := func(method, path, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
 		r.Header.Set("Content-Type", "application/json")
-		r.Header.Set("If-None-Match", etag)
 		w := httptest.NewRecorder()
-		mux.ServeHTTP(w, r)
+		handler.ServeHTTP(w, r)
 		return w
 	}
-	response := call("GET", "/native/sessions?limit=1", "", "")
+	response := call("GET", "/sessions?limit=1", "")
 	if response.Code != 200 || !strings.Contains(response.Body.String(), `"sessions"`) {
 		t.Fatalf("page=%s", response.Body.String())
 	}
-	response = call("GET", "/native/attention", "", "")
-	if response.Code != 200 || response.Header().Get("ETag") == "" {
-		t.Fatal("attention missing revision")
+	response = call("GET", "/attention", "")
+	var attention AttentionSnapshot
+	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &attention) != nil || attention.Revision == "" {
+		t.Fatalf("attention missing revision: %s", response.Body.String())
 	}
-	if unchanged := call("GET", "/native/attention", "", response.Header().Get("ETag")); unchanged.Code != 304 {
-		t.Fatalf("unchanged status=%d", unchanged.Code)
-	}
-	response = call("POST", "/native/sessions/"+s.ID+"/inputs/q_forged", `{"optionId":"yes","actor":{"id":"admin"}}`, "")
-	if response.Code != 400 {
+	response = call("POST", "/sessions/"+s.ID+"/inputs/q_forged", `{"optionId":"yes","actor":{"id":"admin"}}`)
+	if response.Code != 400 || !strings.Contains(response.Body.String(), `"invalid_argument"`) {
 		t.Fatalf("forged actor status=%d", response.Code)
 	}
 }

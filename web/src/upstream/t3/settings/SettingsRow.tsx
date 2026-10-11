@@ -27,9 +27,9 @@ export function SettingsRow({
       {...rowProps}
       tabIndex={rowProps.id ? -1 : rowProps.tabIndex}
       data-slot="settings-row"
-      className={cn("border-b border-border/50 last:border-b-0 aria-disabled:opacity-50 aria-disabled:[&_*]:text-muted-foreground", children ? "pb-3 pt-3.5" : "py-3.5", className)}
+      className={cn("@container/settings-row border-b border-border/50 last:border-b-0 aria-disabled:opacity-50 aria-disabled:[&_*]:text-muted-foreground", children ? "pb-3 pt-3.5" : "py-3.5", className)}
     >
-      <div className="flex flex-col gap-3 sm:grid sm:grid-cols-[minmax(0,1fr)_14rem] sm:items-center sm:gap-8">
+      <div className="flex flex-col gap-3 @min-[32rem]/settings-row:grid @min-[32rem]/settings-row:grid-cols-[minmax(0,1fr)_14rem] @min-[32rem]/settings-row:items-center @min-[32rem]/settings-row:gap-8">
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex min-h-5 items-center gap-1.5">
             <h3 className="text-sm font-medium tracking-[-0.005em] text-foreground">{title}</h3>
@@ -45,7 +45,7 @@ export function SettingsRow({
           {status ? <div className="pt-0.5 text-xs text-muted-foreground">{status}</div> : null}
         </div>
         {renderedControl ? (
-          <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
+          <div className="flex w-full min-w-0 shrink-0 items-center gap-2 @min-[32rem]/settings-row:w-auto @min-[32rem]/settings-row:justify-end">
             {renderedControl}
           </div>
         ) : null}

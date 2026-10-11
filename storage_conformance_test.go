@@ -48,12 +48,12 @@ func TestStorageLostReplyUsesReceiptWithoutReplayingMutation(t *testing.T) {
 	if err := s.appendLocked(Event{Kind: "notice", Text: "one committed event"}); err != nil {
 		t.Fatal(err)
 	}
-	if batches != 1 || lookups != 1 || s.info.LastSeq != 1 {
-		t.Fatalf("batches=%d lookups=%d seq=%d", batches, lookups, s.info.LastSeq)
+	commit(t, s)
+	if batches != 1 || lookups != 1 || s.info.LastSeq != 1 || s.durable != 1 {
+		t.Fatalf("batches=%d lookups=%d seq=%d durable=%d", batches, lookups, s.info.LastSeq, s.durable)
 	}
-	events, err := s.store.readEvents(s.info.ID, 0, 1)
-	if err != nil || len(events) != 1 || events[0].Text != "one committed event" {
-		t.Fatalf("events=%+v err=%v", events, err)
+	if events := stored(t, s, 0, 1); len(events) != 1 || events[0].Text != "one committed event" {
+		t.Fatalf("events=%+v", events)
 	}
 }
 
@@ -70,9 +70,12 @@ func TestStorageUnresolvedReceiptStopsSessionWithoutAutomaticReplay(t *testing.T
 	}, receipt: func(context.Context, string, api.ReceiptRequest) (api.Receipt, error) {
 		return api.Receipt{}, &api.Error{Code: "not_found", Message: "not visible yet"}
 	}}
-	err := s.appendLocked(Event{Kind: "notice", Text: "uncertain"})
-	if err == nil || !strings.Contains(err.Error(), "ar-write-") || s.info.LastSeq != 0 {
-		t.Fatalf("err=%v seq=%d", err, s.info.LastSeq)
+	if err := s.appendLocked(Event{Kind: "notice", Text: "uncertain"}); err != nil {
+		t.Fatal(err)
+	}
+	err := s.flushAll(bg)
+	if err == nil || !strings.Contains(err.Error(), "ar-write-") || s.durable != 0 {
+		t.Fatalf("err=%v durable=%d", err, s.durable)
 	}
 	if err = s.appendLocked(Event{Kind: "notice", Text: "must not replay"}); err == nil || batches != 1 {
 		t.Fatalf("batches=%d err=%v", batches, err)
@@ -92,6 +95,7 @@ func TestStorageIndependentHostsOnlyOneAtomicAppendWins(t *testing.T) {
 	}
 	b := newSession(a.info, other)
 	b.profile = a.profile
+	b.version = a.version
 	start := make(chan struct{})
 	results := make(chan error, 2)
 	var wg sync.WaitGroup
@@ -100,7 +104,11 @@ func TestStorageIndependentHostsOnlyOneAtomicAppendWins(t *testing.T) {
 		go func(s *liveSession) {
 			defer wg.Done()
 			<-start
-			results <- s.appendLocked(Event{Kind: "notice", Text: "contender"})
+			if err := s.appendLocked(Event{Kind: "notice", Text: "contender"}); err != nil {
+				results <- err
+				return
+			}
+			results <- s.flushAll(bg)
 		}(session)
 	}
 	close(start)
@@ -123,8 +131,8 @@ func TestStorageIndependentHostsOnlyOneAtomicAppendWins(t *testing.T) {
 	if err != nil || len(rows) != 1 || rows[0].LastSeq != 1 {
 		t.Fatalf("state diverged: %+v %v", rows, err)
 	}
-	if events, err := a.store.readEvents(a.info.ID, 0, 1); err != nil || len(events) != 1 {
-		t.Fatalf("events=%+v err=%v", events, err)
+	if events := stored(t, a, 0, 1); len(events) != 1 {
+		t.Fatalf("events=%+v", events)
 	}
 }
 
@@ -133,10 +141,15 @@ func TestStorageIdentityAndIncompleteReceiptFailClosed(t *testing.T) {
 	base := s.store.Client
 	s.store.Client = interceptStorage{StorageClient: base, batch: func(ctx context.Context, r api.BatchRequest) (api.Receipt, error) {
 		out, err := base.Batch(ctx, r)
-		out.Versions = out.Versions[:1]
+		if err == nil {
+			out.Versions = out.Versions[:1]
+		}
 		return out, err
 	}}
-	if err := s.appendLocked(Event{Kind: "notice", Text: "bad receipt"}); err == nil || s.info.LastSeq != 0 {
+	if err := s.appendLocked(Event{Kind: "notice", Text: "bad receipt"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.flushAll(bg); err == nil || s.durable != 0 {
 		t.Fatalf("invalid receipt accepted: %v", err)
 	}
 	wrong, err := NewStore(StorageBinding{Client: base, Scope: s.store.Scope, DatabaseID: "wrong", Schema: StorageSchema})
@@ -170,10 +183,15 @@ func TestStorageReceiptMustBindEveryCollection(t *testing.T) {
 	base := s.store.Client
 	s.store.Client = interceptStorage{StorageClient: base, batch: func(ctx context.Context, r api.BatchRequest) (api.Receipt, error) {
 		out, err := base.Batch(ctx, r)
-		out.Versions[0].Collection = "events"
+		if err == nil {
+			out.Versions[0].Collection = "events"
+		}
 		return out, err
 	}}
-	if err := s.appendLocked(Event{Kind: "notice", Text: "wrong collection receipt"}); err == nil || s.info.LastSeq != 0 {
-		t.Fatalf("cross-collection receipt published state: %v", err)
+	if err := s.appendLocked(Event{Kind: "notice", Text: "wrong collection receipt"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.flushAll(bg); err == nil || s.durable != 0 {
+		t.Fatalf("cross-collection receipt accepted: %v", err)
 	}
 }

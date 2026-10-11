@@ -1,5 +1,7 @@
 package agentruntime
 
+import "context"
+
 func (s *liveSession) applyMetadataLocked(event Event) {
 	s.applyQueueEventLocked(event)
 	if event.Kind == "item.snapshot" && event.Role == "user" && event.ItemID == "user" && event.Status == "submitted" {
@@ -17,19 +19,27 @@ func (s *liveSession) applyMetadataLocked(event Event) {
 	}
 }
 
-func (s *liveSession) readEventsLocked(after, end uint64) ([]Event, error) {
-	events, err := s.store.readEvents(s.info.ID, after, end)
-	if err != nil {
-		return nil, err
-	}
-	for _, event := range events {
-		if event.Provider != s.info.Provider {
-			return nil, ErrConflict
+// replayedTurn reports whether the conversation already accepted the prompt
+// with the identity turn: from memory while it is live, from storage otherwise
+// (history is not retained once a conversation is idle). A prompt accepted with
+// other content is ErrConflict. A replay returns only after the original
+// message is durable. No lock is held while storage is read.
+func (s *liveSession) replayedTurn(turn, fingerprint string) (bool, error) {
+	s.mu.Lock()
+	known, ok := s.turns[turn]
+	s.mu.Unlock()
+	if ok {
+		if known.fingerprint != fingerprint {
+			return false, ErrConflict
 		}
+		return true, s.waitDurable(context.Background(), known.seq)
 	}
-	return events, nil
-}
-
-func (s *liveSession) findTurnLocked(turn string) (string, bool, error) {
-	return s.store.prompt(s.info.ID, turn)
+	stored, found, err := s.store.prompt(s.id, turn)
+	if err != nil || !found {
+		return false, err
+	}
+	if stored != fingerprint {
+		return false, ErrConflict
+	}
+	return true, nil
 }

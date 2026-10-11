@@ -28,11 +28,8 @@ func TestNativeMCPImageSurvivesJournalWithoutChangingBytes(t *testing.T) {
 	if err := session.appendLocked(Event{Kind: "item.snapshot", Role: "tool", ItemID: "view-1", Details: details}); err != nil {
 		t.Fatal(err)
 	}
-	events, err := session.readEventsLocked(0, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	event := events[0]
+	commit(t, session)
+	event := stored(t, session, 0, 1)[0]
 	kept := obj(arr(obj(event.Details["result"])["content"])[0])
 	if kept["data"] != data || kept["width"] != float64(16) || kept["height"] != float64(8) {
 		t.Fatal("image changed across journal")

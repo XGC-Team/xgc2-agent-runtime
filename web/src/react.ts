@@ -2,8 +2,8 @@ export { AgentConversation, AgentInput, type AgentConversationProps, type AgentL
 export { T3Conversation, T3PendingRequests } from './T3Conversation.js'
 export { DecisionCard, type DecisionCardProps, type DecisionCardState } from './DecisionCard.js'
 export type { TimelineItem, T3ConversationModel } from './upstream/t3/types.js'
-export { useAgentStream } from './useAgentStream.js'
-export type { AgentStreamTransport, AgentStreamOptions } from './useAgentStream.js'
+export { useAgentStream, AGENT_STREAM_STATUS } from './useAgentStream.js'
+export type { AgentStreamOptions } from './useAgentStream.js'
 
 export { AgentProviderSettings, type AgentProviderSettingsProps } from './AgentProviderSettings.js'
 export { AgentComposerControls, type AgentComposerControlsProps, type AgentComposerSelection } from './AgentComposerControls.js'

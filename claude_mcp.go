@@ -2,10 +2,9 @@ package agentruntime
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"path/filepath"
 	"strings"
+	"time"
 )
 
 func checkClaudeLocalMCP(ctx context.Context, profile Profile) error {
@@ -20,7 +19,7 @@ func checkClaudeLocalMCP(ctx context.Context, profile Profile) error {
 	if err != nil {
 		return errors.New("cannot verify Claude support for host-owned MCP configuration")
 	}
-	for _, flag := range []string{"--mcp-config", "--strict-mcp-config", "--input-format"} {
+	for _, flag := range []string{"--strict-mcp-config", "--input-format"} {
 		if !strings.Contains(string(help), flag) {
 			return errors.New("installed Claude CLI does not support host-owned MCP configuration: missing " + flag)
 		}
@@ -31,43 +30,44 @@ func checkClaudeLocalMCP(ctx context.Context, profile Profile) error {
 	return nil
 }
 
-// Claude accepts --mcp-config files and expands environment variables in HTTP
-// headers. Each native process gets a private, temporary file containing only a
-// credential reference. Neither argv nor the config contains the bearer. Strict
-// loading excludes ambient MCP configuration; no user settings are modified.
-// Create this on every launch, including --resume, so revoked credentials are
-// never recovered from the provider's transcript or a previous runtime file.
-func claudeLocalMCPLaunch(ctx context.Context, args []string) ([]string, []string, func(), error) {
-	noop := func() {}
+// claudeMCPRegistrationTimeout bounds the wait for Claude's answer to the MCP
+// registration. Claude answers once the server is connected or its own start-up
+// timeout (30 s) has passed, and the control channel has no deadline of its own.
+const claudeMCPRegistrationTimeout = 90 * time.Second
+
+// claudeLocalMCPLaunch prepares a native process for the host-owned MCP server.
+// A configuration file with an environment reference keeps the credential out of
+// the argument list, but the reference is expanded from an environment that
+// every command the agent runs inherits. The server therefore goes over the
+// stdin control channel once the process has started (claudeMCPRegistration);
+// the launch itself only excludes ambient MCP configuration, so neither the
+// arguments, the environment nor a file of the process holds the credential. The
+// registration is repeated on every launch, including --resume, so revoked
+// credentials are never recovered from the provider's transcript or from a
+// previous runtime.
+func claudeLocalMCPLaunch(ctx context.Context, args []string) ([]string, map[string]any, error) {
 	server, bound := localMCP(ctx)
 	if !bound {
-		return args, nil, noop, nil
+		return args, nil, nil
 	}
 	if err := server.validate(); err != nil {
-		return nil, nil, noop, err
+		return nil, nil, err
 	}
-	lease, err := nativeScratch(ctx, "native-mcp", 4096, 1)
-	if err != nil {
-		return nil, nil, noop, errors.New("cannot create private Claude MCP configuration")
-	}
-	cleanup := func() { _ = lease.Close() }
-	config := map[string]any{"mcpServers": map[string]any{server.Name: map[string]any{
-		"type": "http", "url": server.URL,
-		"headers": map[string]string{"Authorization": "Bearer ${" + mcpBearerEnvironment + "}"},
-	}}}
-	data, err := json.Marshal(config)
-	if err != nil {
-		cleanup()
-		return nil, nil, noop, errors.New("cannot encode private Claude MCP configuration")
-	}
-	path := filepath.Join(lease.Path(), "mcp.json")
-	if err = lease.WriteFile("mcp.json", data); err != nil {
-		cleanup()
-		return nil, nil, noop, errors.New("cannot write private Claude MCP configuration")
-	}
-	result := append(append([]string{}, args...), "--strict-mcp-config", "--mcp-config", path)
+	result := append(append([]string{}, args...), "--strict-mcp-config")
 	if server.Context != nil {
 		result = append(result, "--append-system-prompt", server.Context.Text)
 	}
-	return result, []string{mcpBearerEnvironment + "=" + server.BearerToken}, cleanup, nil
+	servers := map[string]any{server.Name: map[string]any{
+		"type": "http", "url": server.URL,
+		"headers": map[string]string{"Authorization": "Bearer " + server.BearerToken},
+	}}
+	return result, servers, nil
 }
+
+// claudeMCPRegistration is the control request that gives a started process its
+// MCP servers.
+func claudeMCPRegistration(servers map[string]any) map[string]any {
+	return map[string]any{"type": "control_request", "request_id": claudeMCPRequest, "request": map[string]any{"subtype": "mcp_set_servers", "servers": servers}}
+}
+
+const claudeMCPRequest = "xgc-mcp"

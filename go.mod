@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/XGC-Team/xgc2-storage v0.0.0-20261010075957-dec664004f2e
-	github.com/XGC-Team/xgc2-xrpc/go v0.0.0-20261009012948-b04f601ce153
+	github.com/XGC-Team/xgc2-xrpc/go v0.0.0-20261011013206-d33afa88c426
 	golang.org/x/sys v0.42.0
 )
 
@@ -24,5 +24,3 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 	modernc.org/sqlite v1.46.2 // indirect
 )
-
-replace github.com/XGC-Team/xgc2-xrpc/go => ../xrpc-go/go

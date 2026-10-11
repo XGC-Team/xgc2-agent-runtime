@@ -185,6 +185,55 @@ func TestRefusedStopHoldsTheQueueButKeepsTheTurnAndItsApprovalsAlive(t *testing.
 	neverStarts(t, d.queueDriver)
 }
 
+func TestAStopThatTheClientNeverCompletesIsRecoveredByClosingTheRuntime(t *testing.T) {
+	b, d := stopBroker(t)
+	s := createConversation(t, b, "stalled-stop")
+	turn, err := b.Prompt(bg, s.ID, "stalled", PromptRequest{Text: "never ends"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextQueued(t, d.queueDriver, "never ends")
+	enqueue(t, b, s.ID, "later", "after it")
+	if err := b.Cancel(bg, s.ID); err != nil { // accepted, but the native turn never ends
+		t.Fatal(err)
+	}
+	waitState(t, b, s.ID, "cancelling")
+	if err := b.CloseSession(bg, s.ID); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, b, s.ID, "closed")
+	// The run unwinds on its own: its turn ends as unknown, and a new runtime can be started.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		err := b.Reconnect(bg, s.ID)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, ErrConflict) || time.Now().After(deadline) {
+			t.Fatalf("a closed stalled run was not recoverable: %v", err)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	waitState(t, b, s.ID, "ready")
+	events, _, _ := b.replay(s.ID, 0)
+	ended := 0
+	for _, e := range events {
+		if e.Kind == "turn.end" && e.TurnID == turn {
+			ended++
+			if e.Status != "unknown" {
+				t.Fatalf("the turn of a closed runtime must end as unknown: %+v", e)
+			}
+		}
+	}
+	if ended != 1 {
+		t.Fatalf("turn ended %d times", ended)
+	}
+	if q := queueState(b, s.ID); !q.Paused || len(q.Items) != 1 {
+		t.Fatalf("the stop's hold was lost: %+v", q)
+	}
+	neverStarts(t, d.queueDriver)
+}
+
 func TestRejectedCommandsDoNotHoldTheQueue(t *testing.T) {
 	b, d := stopBroker(t)
 	s := createConversation(t, b, "validation")
@@ -242,6 +291,67 @@ func TestPromptRetryAfterReconnectNeverResends(t *testing.T) {
 	if _, err := b.Prompt(bg, s.ID, "send-once", PromptRequest{Text: "changed"}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("changed retry: %v", err)
 	}
+}
+
+// lostDriver is a queueDriver whose native client dies in the middle of a turn:
+// the prompt call fails and no terminal event was ever sent.
+type lostDriver struct{ *queueDriver }
+
+func (d *lostDriver) PromptWithOptions(ctx context.Context, turn, prompt string, options AgentOptions) error {
+	d.started <- queuedCall{prompt, options}
+	select {
+	case <-d.finish:
+		return io.ErrUnexpectedEOF
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func TestALostNativeClientEndsTheTurnAsUnknownAndHoldsTheQueue(t *testing.T) {
+	b, q, _ := queueBroker(t)
+	d := &lostDriver{q}
+	b.factory = func(_ Profile, sink Sink, ask Ask) (Driver, error) { q.sink, q.ask = sink, ask; return d, nil }
+	s := createConversation(t, b, "lost")
+	turn, err := b.Prompt(bg, s.ID, "send-once", PromptRequest{Text: "do it"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextQueued(t, q, "do it")
+	enqueue(t, b, s.ID, "later", "after it")
+	q.finish <- "lost"
+	waitState(t, b, s.ID, "disconnected")
+
+	events, _, err := b.replay(s.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ends []Event
+	for _, e := range events {
+		if e.Kind == "turn.end" {
+			ends = append(ends, e)
+		}
+	}
+	if len(ends) != 1 || ends[0].TurnID != turn || ends[0].Status != "unknown" {
+		t.Fatalf("a lost client must end the turn as unknown, once: %+v", ends)
+	}
+	if got := queueState(b, s.ID); !got.Paused || len(got.Items) != 1 {
+		t.Fatalf("a lost client left the queue running: %+v", got)
+	}
+	// The prompt may have reached the native client: neither a retry nor a reconnect sends it again.
+	if again, err := b.Prompt(bg, s.ID, "send-once", PromptRequest{Text: "do it"}); err != nil || again != turn {
+		t.Fatalf("retry returned %q, %v", again, err)
+	}
+	if err := b.Reconnect(bg, s.ID); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, b, s.ID, "ready")
+	neverStarts(t, q)
+	// Only the operator releases the hold.
+	held := queueState(b, s.ID)
+	if _, err := b.Queue(bg, s.ID, "resume", QueueCommand{Operation: "resume", ExpectedRevision: held.Revision}); err != nil {
+		t.Fatal(err)
+	}
+	nextQueued(t, q, "after it")
 }
 
 // codexServer plays the native client's side of a Codex app-server connection.

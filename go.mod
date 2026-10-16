@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/XGC-Team/xgc2-storage v0.0.0-20261010075957-dec664004f2e
-	github.com/XGC-Team/xgc2-xrpc/go v0.0.0-20261011052114-ec2953aac4d5
+	github.com/XGC-Team/xgc2-xrpc/go v0.0.0-20261016054318-eabeaea8fa7a
 	golang.org/x/sys v0.42.0
 )
 

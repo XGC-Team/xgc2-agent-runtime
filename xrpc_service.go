@@ -352,7 +352,7 @@ type eventSource struct {
 	id      string
 }
 
-func (s eventSource) Subscribe(ctx context.Context, after string, emit func(httpx.Event) error) error {
+func (s eventSource) Subscribe(ctx context.Context, after string, emit func([]httpx.Event) error) error {
 	var cursor uint64
 	if after != "" {
 		var err error
@@ -365,7 +365,7 @@ func (s eventSource) Subscribe(ctx context.Context, after string, emit func(http
 		if err != nil {
 			return err
 		}
-		return emit(httpx.Event{ID: strconv.FormatUint(e.Seq, 10), Type: "event", Data: data})
+		return emit([]httpx.Event{{ID: strconv.FormatUint(e.Seq, 10), Type: "event", Data: data}})
 	})
 	if errors.Is(err, ErrCursor) {
 		return httpx.ErrCursorGone

@@ -323,3 +323,47 @@ func itoa(n uint64) string {
 	data, _ := json.Marshal(n)
 	return string(data)
 }
+
+type finiteXRPCEventService struct {
+	Service
+	events []Event
+	after  uint64
+}
+
+func (s *finiteXRPCEventService) Subscribe(ctx context.Context, _ string, after uint64, emit func(Event) error) error {
+	s.after = after
+	for _, event := range s.events {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := emit(event); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func TestXRPCEventSourceUsesSingletonBatchesAndStopsOnSinkError(t *testing.T) {
+	service := &finiteXRPCEventService{events: []Event{{Seq: 8, Kind: "first"}, {Seq: 9, Kind: "second"}, {Seq: 10, Kind: "tail"}}}
+	source := eventSource{service: service, id: "session"}
+	stop := errors.New("sink stopped")
+	calls := 0
+	err := source.Subscribe(t.Context(), "7", func(batch []httpx.Event) error {
+		calls++
+		if len(batch) != 1 {
+			t.Fatalf("record batch size%d", len(batch))
+		}
+		event := batch[0]
+		var decoded Event
+		if event.Type != "event" || event.ID != itoa(uint64(7+calls)) || json.Unmarshal(event.Data, &decoded) != nil || decoded.Seq != uint64(7+calls) {
+			t.Fatalf("batch=%+v decoded=%+v", batch, decoded)
+		}
+		if calls == 2 {
+			return stop
+		}
+		return nil
+	})
+	if !errors.Is(err, stop) || calls != 2 || service.after != 7 {
+		t.Fatalf("err=%v calls=%d after=%d", err, calls, service.after)
+	}
+}

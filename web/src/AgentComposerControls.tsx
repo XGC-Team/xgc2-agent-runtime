@@ -67,12 +67,12 @@ export function AgentComposerControls({ providers, value, onChange, disabled = f
           {ProviderIcon ? <ProviderIcon className="size-4 shrink-0" aria-hidden="true" /> : null}
           <span className="min-w-0 truncate">{model?.label ?? value.model ?? selected?.defaults.model ?? (locale === 'zh' ? '供应者默认模型' : 'Provider default model')}</span>
         </ComposerControl>}
-        {selected && model?.efforts.length ? <ComposerEffortControl identityId={identityId} locale={locale} profileId={selected.id} options={model.efforts} value={effort} disabled={providerLocked} onChange={effort => void change({ ...value, effort })} /> : <ComposerControl type="button" disabled className="shrink-0 justify-start whitespace-nowrap"
+        {selected && model?.efforts.length ? <ComposerEffortControl identityId={identityId} locale={locale} profileId={selected.id} options={model.efforts} value={effort} disabled={providerLocked} onChange={effort => void change({ ...value, effort })} /> : <ComposerControl type="button" disabled className="min-w-0 shrink justify-start whitespace-nowrap"
           aria-label={effortLabel} aria-description={unavailable} title={unavailable}
           data-xgc-role="agent-composer-effort" data-xgc-id={modelIdentity}>
           <span className="flex w-full min-w-0 items-center gap-1.5"><span className="min-w-0 truncate">{effortLabel}</span><ComposerControlChevron /></span>
         </ComposerControl>}
-        {selected && selected.permissions.length ? <ComposerPermissionControl identityId={identityId} locale={locale} profileId={selected.id} options={selected.permissions} value={permission} disabled={providerLocked} onChange={permission => void change({ ...value, permission })} /> : <ComposerControl type="button" disabled className="min-w-0 shrink-0 font-medium"
+        {selected && selected.permissions.length ? <ComposerPermissionControl identityId={identityId} locale={locale} profileId={selected.id} options={selected.permissions} value={permission} disabled={providerLocked} onChange={permission => void change({ ...value, permission })} /> : <ComposerControl type="button" disabled className="min-w-0 shrink font-medium"
           aria-label={permissionLabel} aria-description={unavailable} title={unavailable}
           data-xgc-role="agent-composer-permission" data-xgc-id={modelIdentity}>
           <ComposerControlIcon icon={LockIcon} /><span className="min-w-0 truncate">{permissionLabel}</span>

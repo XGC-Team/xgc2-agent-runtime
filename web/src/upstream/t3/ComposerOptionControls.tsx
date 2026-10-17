@@ -19,7 +19,7 @@ export function ComposerPermissionControl({ profileId, options, value, disabled,
   const Icon = permissionIcons[value as keyof typeof permissionIcons] ?? LockIcon;
   return <Tooltip><Select open={open && !disabled} onOpenChange={value => setOpen(!disabled && value)} value={selected?.id ?? null}
     onValueChange={value => { if (!disabled && typeof value === 'string' && options.some(option => option.id === value)) onChange(value); }}>
-    <TooltipTrigger render={<ComposerSelectControl type="button" disabled={disabled} aria-label={locale === 'zh' ? '执行权限' : 'Permissions'} aria-description={label} data-xgc-role="agent-composer-permission" data-xgc-id={identityId ? `${identityId}:${profileId}` : profileId} className="min-w-0 shrink-0 font-medium" />}>
+    <TooltipTrigger render={<ComposerSelectControl type="button" disabled={disabled} aria-label={locale === 'zh' ? '执行权限' : 'Permissions'} aria-description={label} data-xgc-role="agent-composer-permission" data-xgc-id={identityId ? `${identityId}:${profileId}` : profileId} className="min-w-0 shrink font-medium" />}>
       <ComposerControlIcon icon={Icon} /><SelectValue data-xgc-permission-label="">{label}</SelectValue>
     </TooltipTrigger>
     <SelectPopup align="start" side="top" alignItemWithTrigger={false}>
@@ -40,7 +40,7 @@ export function ComposerEffortControl({ profileId, options, value, disabled, onC
   const selected = options.find(option => option.id === value);
   return <Menu open={open && !disabled} onOpenChange={value => setOpen(!disabled && value)}>
     <MenuTrigger render={<ComposerControl type="button" disabled={disabled} aria-label={locale === 'zh' ? '思考强度' : 'Thinking effort'} data-xgc-role="agent-composer-effort" data-xgc-id={identityId ? `${identityId}:${profileId}` : profileId}
-      className="shrink-0 justify-start whitespace-nowrap" />}>
+      className="min-w-0 shrink justify-start whitespace-nowrap" />}>
       <span className="flex w-full min-w-0 items-center gap-1.5"><span className="min-w-0 truncate">{selected?.label ?? (value ? `${value} · ${locale === 'zh' ? '不可用' : 'Unavailable'}` : (locale === 'zh' ? '思考强度' : 'Thinking effort'))}</span><ComposerControlChevron /></span>
     </MenuTrigger>
     <MenuPopup align="start" side="top"><MenuGroup><MenuGroupLabel>{locale === 'zh' ? '思考强度' : 'Thinking effort'}</MenuGroupLabel>

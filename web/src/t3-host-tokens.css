@@ -88,6 +88,7 @@
 :scope [data-xgc-role="agent-composer-controls"] [data-xgc-composer-row] > [data-xgc-role="agent-composer-permission"] {
   flex: 0 1 auto;
   min-width: 0;
+  overflow: hidden;
 }
 /* Keep the real permission state identifiable without truncating its name:
    narrow rows use compact padding, the existing state icon, full accessible text and menu. */

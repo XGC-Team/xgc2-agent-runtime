@@ -65,7 +65,7 @@ export function AgentComposerControls({ providers, value, onChange, disabled = f
           aria-label={locale === 'zh' ? '工作者与模型' : 'Provider and model'} aria-description={modelUnavailableReason} title={modelUnavailableReason}
           data-xgc-role="agent-composer-model" data-xgc-id={modelIdentity}>
           {ProviderIcon ? <ProviderIcon className="size-4 shrink-0" aria-hidden="true" /> : null}
-          <span className="min-w-0 truncate">{model?.label ?? value.model ?? selected?.defaults.model ?? (locale === 'zh' ? '供应者默认模型' : 'Provider default model')}</span>
+          <span className="min-w-0 truncate" data-chat-provider-model-picker-label="">{model?.label ?? value.model ?? selected?.defaults.model ?? (locale === 'zh' ? '供应者默认模型' : 'Provider default model')}</span>
         </ComposerControl>}
         {selected && model?.efforts.length ? <ComposerEffortControl identityId={identityId} locale={locale} profileId={selected.id} options={model.efforts} value={effort} disabled={providerLocked} onChange={effort => void change({ ...value, effort })} /> : <ComposerControl type="button" disabled className="min-w-0 shrink justify-start whitespace-nowrap"
           aria-label={effortLabel} aria-description={unavailable} title={unavailable}

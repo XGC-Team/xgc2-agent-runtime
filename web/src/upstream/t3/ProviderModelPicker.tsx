@@ -31,9 +31,9 @@ export function ProviderModelPicker({ providers, profileId, model, disabled = fa
       data-chat-provider-model-picker="true" data-xgc-role="agent-composer-model" data-xgc-id={identityId ? `${identityId}:${profileId || 'unselected'}` : profileId || 'unselected'}
       className="min-w-0 max-w-48 flex-1 shrink justify-between overflow-hidden whitespace-nowrap sm:max-w-56" />}>
       <span className="flex min-w-0 flex-1 items-center gap-1.5">
-        {Icon ? <Icon className="size-4 shrink-0" aria-hidden="true" /> : null}
-        <Tooltip><TooltipTrigger render={<span className="min-w-0 flex-1 overflow-hidden truncate" data-chat-provider-model-picker-label="true" />}>
-          {title}
+        <Tooltip><TooltipTrigger render={<span className="flex min-w-0 flex-1 items-center gap-1.5" />}>
+          {Icon ? <Icon className="size-4 shrink-0" aria-hidden="true" /> : null}
+          <span className="min-w-0 flex-1 overflow-hidden truncate" data-chat-provider-model-picker-label="true">{title}</span>
         </TooltipTrigger><TooltipPopup side="top">{entry ? `${providerLabels[entry.provider]} · ${title}` : title}</TooltipPopup></Tooltip>
         {resolvedModel && (!selectedModel || !entry?.available || !entry.enabled) ? <span className="text-xs text-muted-foreground">{locale === 'zh' ? '不可用' : 'Unavailable'}</span> : null}
       </span><span aria-hidden="true" className="flex items-center"><ComposerControlChevron /></span>

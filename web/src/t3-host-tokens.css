@@ -91,17 +91,22 @@
   overflow: hidden;
 }
 /* Keep the real permission state identifiable without truncating its name:
-   narrow rows use compact padding, the existing state icon, full accessible text and menu. */
+   narrow rows use compact padding, the existing state icon, full accessible text and menu.
+   The model control collapses to its provider icon at the same breakpoint; the
+   tooltip and picker keep the full provider/model identity one tap away. */
 @container xgc-native-composer (max-width: 20rem) {
   :scope [data-xgc-role="agent-composer-controls"] [data-xgc-composer-row] > * {
     padding-inline: 0.375rem;
   }
-  :scope [data-xgc-role="agent-composer-controls"] [data-xgc-composer-row] > [data-xgc-role="agent-composer-permission"] {
+  :scope [data-xgc-role="agent-composer-controls"] [data-xgc-composer-row] > [data-xgc-role="agent-composer-permission"],
+  :scope [data-xgc-role="agent-composer-controls"] [data-xgc-composer-row] > [data-xgc-role="agent-composer-model"] {
     flex: 0 0 auto;
     padding-inline: 0.25rem;
   }
   :scope [data-xgc-role="agent-composer-permission"] [data-xgc-permission-label],
-  :scope [data-xgc-role="agent-composer-permission"] [data-composer-control-chevron] {
+  :scope [data-xgc-role="agent-composer-permission"] [data-composer-control-chevron],
+  :scope [data-xgc-role="agent-composer-model"] [data-chat-provider-model-picker-label],
+  :scope [data-xgc-role="agent-composer-model"] [data-composer-control-chevron] {
     display: none;
   }
 }

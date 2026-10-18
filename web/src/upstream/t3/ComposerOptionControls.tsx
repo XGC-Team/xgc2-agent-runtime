@@ -3,7 +3,7 @@
 // Adapted ChatComposer.ComposerFooterModeControls and TraitsPicker select menu.
 // XGC adapter: render only native capability options; no prompt-injected traits.
 import { useState } from 'react';
-import { LockIcon, LockOpenIcon, PenLineIcon } from 'lucide-react';
+import { BrainIcon, LockIcon, LockOpenIcon, PenLineIcon } from 'lucide-react';
 import { ComposerControl, ComposerControlChevron, ComposerControlIcon, ComposerSelectControl } from './ComposerControl.js';
 import { Select, SelectItem, SelectPopup, SelectValue } from './ui/select.js';
 import { Menu, MenuTrigger, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuGroup, MenuGroupLabel } from './ui/menu.js';
@@ -38,10 +38,11 @@ export function ComposerEffortControl({ profileId, options, value, disabled, onC
 }) {
   const [open, setOpen] = useState(false);
   const selected = options.find(option => option.id === value);
+  const label = selected?.label ?? (value ? `${value} · ${locale === 'zh' ? '不可用' : 'Unavailable'}` : (locale === 'zh' ? '思考强度' : 'Thinking effort'));
   return <Menu open={open && !disabled} onOpenChange={value => setOpen(!disabled && value)}>
-    <MenuTrigger render={<ComposerControl type="button" disabled={disabled} aria-label={locale === 'zh' ? '思考强度' : 'Thinking effort'} data-xgc-role="agent-composer-effort" data-xgc-id={identityId ? `${identityId}:${profileId}` : profileId}
+    <MenuTrigger render={<ComposerControl type="button" disabled={disabled} aria-label={locale === 'zh' ? '思考强度' : 'Thinking effort'} aria-description={label} title={label} data-xgc-role="agent-composer-effort" data-xgc-id={identityId ? `${identityId}:${profileId}` : profileId}
       className="min-w-0 shrink justify-start whitespace-nowrap" />}>
-      <span className="flex w-full min-w-0 items-center gap-1.5"><span className="min-w-0 truncate">{selected?.label ?? (value ? `${value} · ${locale === 'zh' ? '不可用' : 'Unavailable'}` : (locale === 'zh' ? '思考强度' : 'Thinking effort'))}</span><ComposerControlChevron /></span>
+      <span className="flex w-full min-w-0 items-center gap-1.5"><ComposerControlIcon icon={BrainIcon} className="xgc-composer-effort-icon" /><span className="min-w-0 truncate" data-composer-effort-label="">{label}</span><ComposerControlChevron /></span>
     </MenuTrigger>
     <MenuPopup align="start" side="top"><MenuGroup><MenuGroupLabel>{locale === 'zh' ? '思考强度' : 'Thinking effort'}</MenuGroupLabel>
       <MenuRadioGroup value={selected?.id ?? ''} onValueChange={value => { if (!disabled && options.some(option => option.id === value)) onChange(value); }}>

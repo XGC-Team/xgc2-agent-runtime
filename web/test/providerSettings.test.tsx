@@ -192,6 +192,8 @@ describe('migrated native composer choices', () => {
     expect(row!.contains(permission)).toBe(true)
     expect(effort.classList.contains('shrink')).toBe(true)
     expect(permission.classList.contains('shrink')).toBe(true)
+    expect(effort.querySelector('.xgc-composer-effort-icon')).toBeTruthy()
+    expect(effort.querySelector('[data-composer-effort-label]')).toBeTruthy()
     const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../src/t3-host-tokens.css'), 'utf8')
     const start = css.indexOf(':scope [data-xgc-role="agent-composer-controls"] [data-xgc-composer-row] {')
     expect(start).toBeGreaterThanOrEqual(0)
@@ -202,6 +204,7 @@ describe('migrated native composer choices', () => {
     expect(responsiveStart).toBeGreaterThanOrEqual(0)
     expect(css.slice(responsiveStart, responsiveEnd)).toContain('agent-composer-permission')
     expect(css.slice(responsiveStart, responsiveEnd)).toContain('flex: 0 1 auto')
+    expect(css).toContain('@container xgc-native-composer (max-width: 6rem)')
   })
   it('never manufactures effort choices and gates all callbacks while inactive', () => {
     const changed = vi.fn()

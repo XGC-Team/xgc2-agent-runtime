@@ -1,6 +1,6 @@
 import type { AgentLocale } from './agentPresentation.js'
 import { useRef, useState } from 'react'
-import { LockIcon } from 'lucide-react'
+import { BrainIcon, LockIcon } from 'lucide-react'
 import type { AgentTurnOptions } from './state.js'
 import type { AgentProviderConfiguration } from './providerSettings.js'
 import { ProviderModelPicker, providerIcons } from './upstream/t3/ProviderModelPicker.js'
@@ -70,7 +70,7 @@ export function AgentComposerControls({ providers, value, onChange, disabled = f
         {selected && model?.efforts.length ? <ComposerEffortControl identityId={identityId} locale={locale} profileId={selected.id} options={model.efforts} value={effort} disabled={providerLocked} onChange={effort => void change({ ...value, effort })} /> : <ComposerControl type="button" disabled className="min-w-0 shrink justify-start whitespace-nowrap"
           aria-label={effortLabel} aria-description={unavailable} title={unavailable}
           data-xgc-role="agent-composer-effort" data-xgc-id={modelIdentity}>
-          <span className="flex w-full min-w-0 items-center gap-1.5"><span className="min-w-0 truncate">{effortLabel}</span><ComposerControlChevron /></span>
+          <span className="flex w-full min-w-0 items-center gap-1.5"><ComposerControlIcon icon={BrainIcon} className="xgc-composer-effort-icon" /><span className="min-w-0 truncate" data-composer-effort-label="">{effortLabel}</span><ComposerControlChevron /></span>
         </ComposerControl>}
         {selected && selected.permissions.length ? <ComposerPermissionControl identityId={identityId} locale={locale} profileId={selected.id} options={selected.permissions} value={permission} disabled={providerLocked} onChange={permission => void change({ ...value, permission })} /> : <ComposerControl type="button" disabled className="min-w-0 shrink font-medium"
           aria-label={permissionLabel} aria-description={unavailable} title={unavailable}

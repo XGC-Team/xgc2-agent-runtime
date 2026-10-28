@@ -36,9 +36,12 @@ type Grant struct {
 	MaxFileBytes int64  `json:"max_file_bytes"`
 	MaxEntries   int    `json:"max_entries"`
 	MaxLeases    int    `json:"max_leases"`
-	Trigger      string `json:"trigger"`
-	Cleanup      string `json:"cleanup"`
-	Recovery     string `json:"recovery"`
+	// SymlinkMetadata admits link entries and their stored target bytes during
+	// inventory only. It never grants access to, or traversal of, link targets.
+	SymlinkMetadata bool   `json:"symlink_metadata,omitempty"`
+	Trigger         string `json:"trigger"`
+	Cleanup         string `json:"cleanup"`
+	Recovery        string `json:"recovery"`
 }
 type Root struct {
 	grant  Grant
@@ -71,7 +74,7 @@ func Open(g Grant) (*Root, error) {
 		return nil, err
 	}
 	r := &Root{grant: g, root: root, active: map[string]*Lease{}}
-	if _, _, err = inventory(context.Background(), root, g.MaxBytes, g.MaxFileBytes, g.MaxEntries, nil); err != nil {
+	if _, _, err = inventory(context.Background(), root, g.MaxBytes, g.MaxFileBytes, g.MaxEntries, g.SymlinkMetadata, nil); err != nil {
 		root.Close()
 		return nil, err
 	}
@@ -85,7 +88,7 @@ func (r *Root) Check(ctx context.Context) error {
 	if r.closed {
 		return os.ErrClosed
 	}
-	_, _, err := inventory(ctx, r.root, r.grant.MaxBytes, r.grant.MaxFileBytes, r.grant.MaxEntries, nil)
+	_, _, err := inventory(ctx, r.root, r.grant.MaxBytes, r.grant.MaxFileBytes, r.grant.MaxEntries, r.grant.SymlinkMetadata, nil)
 	return err
 }
 func (r *Root) Close() error {
@@ -128,7 +131,7 @@ func (r *Root) TempDir(ctx context.Context, prefix string, bytes int64, entries 
 		reservedBytes += lease.bytes
 		reservedEntries += lease.entries + 1
 	}
-	used, count, err := inventory(ctx, r.root, r.grant.MaxBytes, r.grant.MaxFileBytes, r.grant.MaxEntries, skip)
+	used, count, err := inventory(ctx, r.root, r.grant.MaxBytes, r.grant.MaxFileBytes, r.grant.MaxEntries, r.grant.SymlinkMetadata, skip)
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +162,7 @@ func (l *Lease) Check(ctx context.Context) error {
 	if l.closed {
 		return os.ErrClosed
 	}
-	_, _, err := inventory(ctx, l.root, l.bytes, l.owner.grant.MaxFileBytes, l.entries, nil)
+	_, _, err := inventory(ctx, l.root, l.bytes, l.owner.grant.MaxFileBytes, l.entries, l.owner.grant.SymlinkMetadata, nil)
 	return err
 }
 
@@ -173,7 +176,7 @@ func (l *Lease) Create(name string, limit int64) (*File, error) {
 	if l.closed {
 		return nil, os.ErrClosed
 	}
-	used, count, err := inventory(context.Background(), l.root, l.bytes, l.owner.grant.MaxFileBytes, l.entries, nil)
+	used, count, err := inventory(context.Background(), l.root, l.bytes, l.owner.grant.MaxFileBytes, l.entries, l.owner.grant.SymlinkMetadata, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -283,69 +286,73 @@ func (w *File) Chmod(mode os.FileMode) error {
 	return w.file.Chmod(mode)
 }
 
-func inventory(ctx context.Context, root *os.Root, maxBytes, maxFile int64, maxEntries int, skip map[string]bool) (int64, int, error) {
+func inventory(ctx context.Context, root *os.Root, maxBytes, maxFile int64, maxEntries int, symlinkMetadata bool, skip map[string]bool) (int64, int, error) {
 	var bytes int64
 	entries := 0
-	paths := []string{"."}
-	for len(paths) > 0 {
+	directory, err := root.Open(".")
+	if err != nil {
+		return 0, 0, err
+	}
+	// Walk relative to held directory descriptors. Lstat and each child open
+	// refuse symlink traversal, including a directory replaced after its stat.
+	// Only one branch holds descriptors at a time; sibling count adds no FDs.
+	var walk func(*os.File, bool) error
+	walk = func(dir *os.File, top bool) (resultErr error) {
+		defer func() { resultErr = errors.Join(resultErr, dir.Close()) }()
 		if err := ctx.Err(); err != nil {
-			return 0, 0, err
-		}
-		path := paths[len(paths)-1]
-		paths = paths[:len(paths)-1]
-		dir, err := root.Open(path)
-		if err != nil {
-			return 0, 0, err
+			return err
 		}
 		for {
 			batch, readErr := dir.ReadDir(64)
 			for _, entry := range batch {
 				if err := ctx.Err(); err != nil {
-					dir.Close()
-					return 0, 0, err
+					return err
 				}
-				if path == "." && skip[entry.Name()] {
+				if top && skip[entry.Name()] {
 					continue
 				}
 				entries++
 				if entries > maxEntries {
-					dir.Close()
-					return 0, 0, ErrLimit
+					return ErrLimit
 				}
-				info, err := entry.Info()
-				if err != nil {
-					dir.Close()
-					return 0, 0, err
+				var info unix.Stat_t
+				if err := unix.Fstatat(int(dir.Fd()), entry.Name(), &info, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+					return err
 				}
-				if info.Mode()&os.ModeSymlink != 0 {
-					dir.Close()
-					return 0, 0, ErrGrant
-				}
-				name := filepath.Join(path, entry.Name())
-				if info.IsDir() {
-					paths = append(paths, name)
-				} else if info.Mode().IsRegular() {
-					if info.Size() > maxFile || bytes > maxBytes-info.Size() {
-						dir.Close()
-						return 0, 0, ErrLimit
+				switch info.Mode & unix.S_IFMT {
+				case unix.S_IFDIR:
+					fd, err := unix.Openat(int(dir.Fd()), entry.Name(), unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+					if err != nil {
+						return err
 					}
-					bytes += info.Size()
-				} else {
-					dir.Close()
-					return 0, 0, ErrGrant
+					if err := walk(os.NewFile(uintptr(fd), entry.Name()), false); err != nil {
+						return err
+					}
+				case unix.S_IFLNK:
+					if !symlinkMetadata {
+						return ErrGrant
+					}
+					fallthrough
+				case unix.S_IFREG:
+					if info.Size < 0 || info.Size > maxFile || bytes > maxBytes-info.Size {
+						return ErrLimit
+					}
+					bytes += info.Size
+				default:
+					return ErrGrant
 				}
 			}
 			if readErr == io.EOF {
 				break
 			}
 			if readErr != nil {
-				dir.Close()
-				return 0, 0, readErr
+				return readErr
 			}
 		}
-		if err := dir.Close(); err != nil {
-			return 0, 0, err
-		}
+		return nil
+	}
+	if err := walk(directory, true); err != nil {
+		return 0, 0, err
 	}
 	return bytes, entries, nil
 }

@@ -17,6 +17,16 @@ Scratch allocations reserve their entire finite budget before creating work.
 The bounded `File` rejects excessive writes before writing any excess bytes.
 Live writers and subprocesses retain their reservation through actual closure.
 
+Provider-state hosts can explicitly grant `SymlinkMetadata` for native clients
+that create helper links. Inventory counts each link and its stored target-text
+length against the entry, per-file and total-byte limits. It never opens the
+target, follows a linked directory or reads target data. Directory descent uses
+held parent descriptors and `O_NOFOLLOW`; replacing a directory with a link
+cannot redirect the inventory. Root-path links remain forbidden. The bounded
+writer still creates new direct regular files exclusively, and lease removal
+unlinks entries without following their targets. Grants without this metadata
+permission continue to reject link entries.
+
 Native version/status/model inspection uses a granted scratch cwd. MCP launch
 files contain only credential references, have a 4 KiB allowance and are
 removed after the process exits. Native temporary files have a 32 MiB / 256-entry

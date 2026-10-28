@@ -7,6 +7,7 @@ import (
 	"errors"
 	"github.com/XGC-Team/xgc2-agent-runtime/managedfiles"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,7 +16,7 @@ import (
 func testNativeFiles(t *testing.T) *NativeFiles {
 	t.Helper()
 	open := func(category string) *managedfiles.Root {
-		r, err := managedfiles.Open(managedfiles.Grant{Owner: "protocol-fixture", Category: category, Schema: "native-files.v1", Scope: "fixture-user/workspace", Path: t.TempDir(), MaxBytes: 256 << 20, MaxFileBytes: 64 << 20, MaxEntries: 4096, MaxLeases: 16, Trigger: "isolated fixture launch", Cleanup: "lease close after native exit", Recovery: "keep interrupted work until explicit cleanup"})
+		r, err := managedfiles.Open(managedfiles.Grant{Owner: "protocol-fixture", Category: category, Schema: "native-files.v1", Scope: "fixture-user/workspace", Path: t.TempDir(), MaxBytes: 256 << 20, MaxFileBytes: 64 << 20, MaxEntries: 4096, MaxLeases: 16, SymlinkMetadata: category != "native-scratch", Trigger: "isolated fixture launch", Cleanup: "lease close after native exit", Recovery: "keep interrupted work until explicit cleanup"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -73,4 +74,28 @@ func TestNativeProbeRequiresFilesAndUsesOnlyGrantedHomeAndScratch(t *testing.T) 
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("ambient writes: %v %v", entries, err)
 	}
+}
+
+func TestActualCodexVersionRetainsGrantedProviderState(t *testing.T) {
+	binary, err := exec.LookPath("codex")
+	if err != nil {
+		t.Skip("actual Codex CLI is required for this native process check")
+	}
+	profile, err := resolveProfile(ProviderUpdate{ID: "codex", Provider: "codex", Enabled: true, BinaryPath: binary})
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := testNativeFiles(t)
+	output, err := cliOutput(WithNativeFiles(t.Context(), files), profile, "--version")
+	if err != nil || !strings.HasPrefix(strings.TrimSpace(string(output)), "codex-cli ") {
+		t.Fatalf("actual Codex version inspection: %q, %v", output, err)
+	}
+	if err := files.states["codex"].Check(t.Context()); err != nil {
+		t.Fatal("actual native helper links failed finite provider-state inventory: ", err)
+	}
+	entries, err := os.ReadDir(files.scratch.Path())
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("actual exited native probe retained scratch admission: %v, %v", entries, err)
+	}
+	t.Logf("actual native version process passed: %s; no provider login or inference was performed", strings.TrimSpace(string(output)))
 }

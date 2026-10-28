@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { TimelineItem } from '../src/upstream/t3/types.js'
-import { EMPTY_NATIVE_TIMELINE_STATE, AgentTimelineStateProvider, useTimelineDisclosure } from '../src/timelineState.js'
+import { EMPTY_NATIVE_TIMELINE_STATE, AgentTimelineStateProvider, useNativeTimelineState, useTimelineDisclosure } from '../src/timelineState.js'
 import { MessagesTimeline } from '../src/upstream/t3/MessagesTimeline.js'
 
 // This probe tests the shared virtualizer contract, NOT rendering performance.
@@ -59,5 +59,24 @@ describe('one shared LegendList for the complete timeline', () => {
     view.rerender(<AgentTimelineStateProvider>{null}</AgentTimelineStateProvider>)
     view.rerender(<AgentTimelineStateProvider><Row /></AgentTimelineStateProvider>)
     expect(screen.getByRole('button').getAttribute('aria-expanded')).toBe('true')
+  })
+  it('does not rerender unrelated disclosure rows when the scroll or another row changes', () => {
+    const renders = new Map<string,number>()
+    const Row = memo(function Row({ id }:{ id:string }) {
+      const [expanded,toggle] = useTimelineDisclosure(id)
+      renders.set(id,(renders.get(id) ?? 0)+1)
+      return <button onClick={toggle} aria-expanded={expanded}>{id}</button>
+    })
+    function Pin() {
+      const { state,change } = useNativeTimelineState()
+      return <button onClick={() => change({ ...state,pinnedToBottom:!state.pinnedToBottom })}>Pin</button>
+    }
+    render(<AgentTimelineStateProvider><Pin /><Row id="first" /><Row id="second" /></AgentTimelineStateProvider>)
+    renders.clear()
+    fireEvent.click(screen.getByRole('button',{ name:'Pin' }))
+    expect(renders.size).toBe(0)
+    fireEvent.click(screen.getByRole('button',{ name:'first' }))
+    expect(screen.getByRole('button',{ name:'first' }).getAttribute('aria-expanded')).toBe('true')
+    expect([...renders]).toEqual([['first',1]])
   })
 })

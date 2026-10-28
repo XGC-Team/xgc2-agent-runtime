@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from 'react'
+import { useMemo, useRef, type ReactNode } from 'react'
 import { T3Conversation, T3PendingRequests } from './T3Conversation.js'
 import { DecisionCard, type DecisionCardState } from './DecisionCard.js'
 import { StaleApprovalNotice } from './StaleApprovalNotice.js'
@@ -6,7 +6,7 @@ import { optimisticTimelineItems, type AgentOptimisticMessage } from './optimist
 import type { AgentTimelineState } from './timelineState.js'
 import type { AgentAnswer, AgentRequest, AgentDecisionRecord, StreamState } from './state.js'
 import { emptyStream } from './state.js'
-import { nativeApprovalAnswer, nativeCancelAnswer, nativeConversationModel, nativeQuestionAnswer, nativeRequestPresentation, type AgentLocale } from './agentPresentation.js'
+import { createNativeTimelineProjector, nativeApprovalAnswer, nativeCancelAnswer, nativeConversationModel, nativeQuestionAnswer, nativeRequestPresentation, type AgentLocale } from './agentPresentation.js'
 import type { TimelineItem } from './upstream/t3/types.js'
 
 export type { AgentLocale } from './agentPresentation.js'
@@ -49,23 +49,35 @@ const EMPTY_OPTIMISTIC_MESSAGES: readonly AgentOptimisticMessage[] = []
 /** Shared native presentation adapter. Transport, ownership and authorizations stay with the host. */
 export function AgentConversation({ state, active = true, disabled = false, sendDisabled, sendDisabledReason, queueEnabled, error, renderApprovalControls, onSend, onInterrupt, onAnswer, additionalItems = EMPTY_TIMELINE_ITEMS, additionalPendingRequests, draft, onDraftChange, locale = 'en', composerControls, dock, emptyState,
   optimisticMessages = EMPTY_OPTIMISTIC_MESSAGES, onRetryOptimisticMessage, onRefreshRequests, staleRequestIds, timelineState, onTimelineStateChange, clearDraftOnSend }: AgentConversationProps) {
-  const nativeModel = useMemo(() => nativeConversationModel(state, locale), [state, locale])
-  const optimistic = useMemo(() => optimisticTimelineItems(state.sessionId, state.items, optimisticMessages, locale, onRetryOptimisticMessage),
-    [state.sessionId, state.items, optimisticMessages, locale, onRetryOptimisticMessage])
+  const projector = useMemo(() => createNativeTimelineProjector(), [state.sessionId,state.provider])
+  const empty = useMemo(() => emptyStream(state.sessionId,state.provider), [state.sessionId,state.provider])
+  const retained = useRef<{ state:StreamState;locale:AgentLocale;additionalItems:readonly TimelineItem[];optimisticMessages:readonly AgentOptimisticMessage[];
+    onRetryOptimisticMessage?: (id:string) => Promise<unknown>;onRefreshRequests?: () => Promise<unknown> } | null>(null)
+  if (retained.current?.state.sessionId !== state.sessionId || retained.current?.state.provider !== state.provider) retained.current = null
+  if (active) retained.current = { state,locale,additionalItems,optimisticMessages,onRetryOptimisticMessage,onRefreshRequests }
+  const presentation: NonNullable<typeof retained.current> = retained.current ?? { state:empty,locale,additionalItems:EMPTY_TIMELINE_ITEMS,optimisticMessages:EMPTY_OPTIMISTIC_MESSAGES }
+  const shownState = presentation.state,shownLocale = presentation.locale
+  const nativeModel = useMemo(() => nativeConversationModel(shownState, shownLocale, projector), [shownState, shownLocale, projector])
+  const optimistic = useMemo(() => presentation.optimisticMessages.length
+    ? optimisticTimelineItems(shownState.sessionId, shownState.items, presentation.optimisticMessages, shownLocale, presentation.onRetryOptimisticMessage)
+    : EMPTY_TIMELINE_ITEMS,
+  [shownState.sessionId, shownState.items, presentation.optimisticMessages, shownLocale, presentation.onRetryOptimisticMessage])
+  const failures = useMemo<TimelineItem[]>(() => Object.entries(shownState.turnFailures ?? {}).map(([turnId, failure]) => ({
+    kind: 'custom', id: `failure:${shownState.sessionId}:${turnId}`, createdAt: failure.createdAt,
+    content: <div role="alert" className="px-1 py-0.5 text-sm text-destructive" data-xgc-role="agent-turn-error" data-xgc-id={`${shownState.sessionId}:${turnId}`}>
+      {failure.message || (shownLocale === 'zh' ? '\u6b64\u8f6e\u56de\u590d\u5931\u8d25\uff0c\u4f9b\u5e94\u8005\u672a\u63d0\u4f9b\u5177\u4f53\u539f\u56e0\u3002' : 'This response failed. The provider did not provide a reason.')}
+    </div>,
+  })), [shownState.turnFailures,shownState.sessionId,shownLocale])
+  const decisions = useMemo<TimelineItem[]>(() => Object.values(shownState.decisions).filter((record) => record.status === 'answered' || record.status === 'expired')
+    .map((record) => ({ kind: 'custom', id: `decision:${shownState.sessionId}:${record.request.id}`, createdAt: record.request.createdAt,
+      content: <AgentDecisionHistory sessionId={shownState.sessionId} record={record} locale={shownLocale} onRefresh={presentation.onRefreshRequests} /> })),
+  [shownState.decisions,shownState.sessionId,shownLocale,presentation.onRefreshRequests])
   const model = useMemo(() => {
-    const failures: TimelineItem[] = Object.entries(state.turnFailures ?? {}).map(([turnId, failure]) => ({
-      kind: 'custom', id: `failure:${state.sessionId}:${turnId}`, createdAt: failure.createdAt,
-      content: <div role="alert" className="px-1 py-0.5 text-sm text-destructive" data-xgc-role="agent-turn-error" data-xgc-id={`${state.sessionId}:${turnId}`}>
-        {failure.message || (locale === 'zh' ? '此轮回复失败，供应者未提供具体原因。' : 'This response failed. The provider did not provide a reason.')}
-      </div>,
-    }))
-    const decisions: TimelineItem[] = Object.values(state.decisions).filter((record) => record.status === 'answered' || record.status === 'expired')
-      .map((record) => ({ kind: 'custom', id: `decision:${state.sessionId}:${record.request.id}`, createdAt: record.request.createdAt,
-        content: <AgentDecisionHistory sessionId={state.sessionId} record={record} locale={locale} onRefresh={onRefreshRequests} /> }))
-    return { ...nativeModel, items: mergeTimelineItems(nativeModel.items, [...decisions, ...failures, ...additionalItems, ...optimistic]) }
-  }, [nativeModel, state.decisions, state.turnFailures, state.sessionId, locale, additionalItems, optimistic, onRefreshRequests])
+    if (!decisions.length && !failures.length && !presentation.additionalItems.length && !optimistic.length) return nativeModel
+    return { ...nativeModel, items: mergeTimelineItems(nativeModel.items, [...decisions, ...failures, ...presentation.additionalItems, ...optimistic]) }
+  }, [nativeModel,decisions,failures,presentation.additionalItems,optimistic])
   return <T3Conversation key={state.sessionId} model={model}
-    active={active} disabled={disabled} locale={locale} queueEnabled={queueEnabled} sendDisabled={sendDisabled ?? (!onSend || state.worker !== 'ready')} sendDisabledReason={sendDisabledReason} error={error} renderApprovalControls={renderApprovalControls}
+    active={active} disabled={disabled} locale={shownLocale} queueEnabled={queueEnabled} sendDisabled={sendDisabled ?? (!onSend || state.worker !== 'ready')} sendDisabledReason={sendDisabledReason} error={error} renderApprovalControls={renderApprovalControls}
     composerControls={composerControls} dock={dock} additionalPendingRequests={additionalPendingRequests} emptyState={emptyState} composerEnabled={Boolean(onSend)} interruptEnabled={Boolean(onInterrupt)} draft={draft} onDraftChange={onDraftChange}
     onRefreshRequests={onRefreshRequests} staleRequestIds={staleRequestIds} timelineState={timelineState} onTimelineStateChange={onTimelineStateChange} clearDraftOnSend={clearDraftOnSend}
     onSend={async (text) => { if (!onSend) throw new Error('No native session is connected.'); return onSend(text) }}

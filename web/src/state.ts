@@ -62,6 +62,25 @@ export type StreamState = {
   notices: string[]; lastTurnStatus: string; recent: Record<number, string>
   turnFailures?: Record<string, { message: string; createdAt?: string }>
 }
+
+// Tokens carry only array identity, not a reference to an earlier journal. The
+// presentation owner can apply a consecutive reducer delta without retaining a
+// chain of historical arrays; arbitrary snapshots still reconcile by identity.
+const itemArrayTokens = new WeakMap<readonly AgentItem[],object>()
+const itemArrayChanges = new WeakMap<readonly AgentItem[],{ previous:object;indices:readonly number[] }>()
+function itemArrayToken(items: readonly AgentItem[]) {
+  let token = itemArrayTokens.get(items)
+  if (!token) { token = {};itemArrayTokens.set(items,token) }
+  return token
+}
+function rememberItemChanges(previous: readonly AgentItem[],next: readonly AgentItem[],indices: readonly number[]) {
+  itemArrayChanges.set(next,{ previous:itemArrayToken(previous),indices })
+}
+export function presentationItemChanges(previous: readonly AgentItem[],next: readonly AgentItem[]): readonly number[] | undefined {
+  const token = itemArrayTokens.get(previous)
+  const change = itemArrayChanges.get(next)
+  return token && change?.previous === token ? change.indices : undefined
+}
 const workerStates: WorkerState[] = ['starting', 'ready', 'running', 'awaiting-input', 'cancelling', 'disconnected', 'closed']
 const kinds: AgentEvent['kind'][] = ['prompt.queue', 'session.state', 'session.identity', 'session.metadata', 'session.runtime', 'item.delta', 'item.snapshot', 'item.patch', 'input.request', 'input.submitted', 'input.resolved', 'turn.end', 'notice']
 const roles: Role[] = ['user', 'assistant', 'tool', 'plan', 'activity']
@@ -345,6 +364,7 @@ export function applyEvent(state: StreamState, raw: unknown): StreamState {
       }
       next.items = [...state.items]
       if (index < 0) next.items.push(item); else next.items[index] = item
+      rememberItemChanges(state.items,next.items,[index < 0 ? state.items.length : index])
       break
     }
     case 'input.request':
@@ -363,16 +383,23 @@ export function applyEvent(state: StreamState, raw: unknown): StreamState {
       if (state.queue && e.queue!.revision <= state.queue.revision) throw new Error('Queue revision did not advance.')
       next.queue = e.queue
       break
-    case 'turn.end':
+    case 'turn.end': {
       next.pending = {}
       next.decisions = expireDecisions(state.decisions, e.createdAt)
       next.lastTurnStatus = e.status!
       if (e.status === 'failed') next.turnFailures = { ...state.turnFailures, [e.turnId!]: { message: e.text ?? '', createdAt: e.createdAt } }
       if (state.activeTurnId === e.turnId) next.activeTurnId = ''
       // A turn result does not certify the terminal result of any tool item.
-      next.items = state.items.map((item) => item.turnId === e.turnId ? { ...item, turnStatus: e.status as AgentTurnStatus } : item)
+      const changedItems: number[] = []
+      next.items = state.items.map((item,index) => {
+        if (item.turnId !== e.turnId) return item
+        changedItems.push(index)
+        return { ...item, turnStatus: e.status as AgentTurnStatus }
+      })
+      rememberItemChanges(state.items,next.items,changedItems)
       if (e.text) next.notices = [...state.notices, e.text].slice(-32)
       break
+    }
     case 'notice':
       if (e.text) next.notices = [...state.notices, e.text].slice(-32)
       break

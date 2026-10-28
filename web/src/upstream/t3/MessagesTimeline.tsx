@@ -121,8 +121,10 @@ function expandedToolBody(entry: TimelineWork): string {
 const PlainWorkEntryRow = memo(function PlainWorkEntryRow({ workEntry }: { workEntry: TimelineWork }) {
   const identity = useT3Identity();
   const [expanded, toggleExpanded] = useTimelineDisclosure(workEntry.id);
-  const body = expandedToolBody(workEntry);
-  const canExpand = Boolean(body);
+  const data = workEntry.toolData;
+  const canExpand = Boolean(data?.command || workEntry.command || data?.cwd || data?.exitCode != null || data?.durationMs != null ||
+    workEntry.detail || data?.changes?.length || data?.arguments !== undefined || data?.result !== undefined);
+  const body = useMemo(() => expanded ? expandedToolBody(workEntry) : '',[expanded,workEntry]);
   const failed = workEntry.tone === 'error' || workEntry.status === 'failed';
   const warning = workEntry.tone === 'warning';
   const stopRowToggle = (event: { stopPropagation: () => void }) => event.stopPropagation();

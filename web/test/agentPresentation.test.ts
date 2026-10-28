@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
-import { emptyStream, type AgentItem, type AgentRequest, type StreamState } from '../src/state.js'
-import { nativeApprovalAnswer, nativeCancelAnswer, nativeConversationModel, nativeQuestionAnswer } from '../src/agentPresentation.js'
+import { describe, expect, it, vi } from 'vitest'
+import { applyEvent, emptyStream, type AgentItem, type AgentRequest, type StreamState } from '../src/state.js'
+import { createNativeTimelineProjector, nativeApprovalAnswer, nativeCancelAnswer, nativeConversationModel, nativeQuestionAnswer } from '../src/agentPresentation.js'
 
 function state(): StreamState { return { ...emptyStream('session-a', 'codex'), worker: 'running', activeTurnId: 'turn-a' } }
 function item(patch: Partial<AgentItem> = {}): AgentItem {
@@ -140,5 +140,79 @@ describe('native protocol to migrated T3 presentation', () => {
     expect(model.items[1]).not.toHaveProperty('status')
     expect(JSON.stringify(model.items)).not.toContain('完成结果未确认')
     expect(JSON.stringify(model.items)).not.toContain('Completion unconfirmed')
+  })
+})
+
+describe('conversation projection ownership', () => {
+  it.each([1,128])('retains %i historical tool projections across a real assistant delta and duplicate', (count) => {
+    const input = state()
+    input.items = [
+      ...Array.from({ length:count },(_,index) => item({ id:`tool-${index}`,key:`tool-${index}`,turnId:`old-${index}`,
+        role:'tool',status:'completed',title:`Tool ${index}`,details:{ type:'mcpToolCall',server:'test',tool:'inspect',result:{ content:[
+          { type:'text',text:'{"imageTitle":{"en":"Camera","zh":"\\u76f8\\u673a"}}' },
+          { type:'image',mimeType:'image/png',data:'AA==',width:1,height:1 },
+        ] } } })),
+      item(),
+    ]
+    let historicalVisits = 0
+    for (const entry of input.items.slice(0,count)) Object.defineProperty(entry,'role',{
+      enumerable:true,get() { historicalVisits += 1;return 'tool' },
+    })
+    input.pending = { approval:permission() }
+    const projector = createNativeTimelineProjector()
+    const parse = vi.spyOn(JSON,'parse')
+    const before = nativeConversationModel(input,'en',projector)
+    expect(parse).toHaveBeenCalledTimes(count)
+    parse.mockClear()
+    historicalVisits = 0
+    const event = { schemaVersion:'xgc.agent-runtime/v1',sessionId:input.sessionId,provider:'codex',seq:1,kind:'item.delta',turnId:'turn-a',itemId:'item-a',role:'assistant',text:' next' }
+    const next = applyEvent(input,event)
+    parse.mockClear()
+    const after = nativeConversationModel(next,'en',projector)
+    expect(parse).not.toHaveBeenCalled()
+    expect(historicalVisits).toBe(0)
+    for (let index=0;index<count;index+=1) expect(after.items[index]).toBe(before.items[index])
+    expect(after.items[count]).not.toBe(before.items[count])
+    expect(after.approvals).toBe(before.approvals)
+    const duplicate = applyEvent(next,event)
+    expect(duplicate).toBe(next)
+    expect(nativeConversationModel(duplicate,'en',projector).items).toBe(after.items)
+    expect(parse).not.toHaveBeenCalled()
+    parse.mockRestore()
+  })
+
+  it('invalidates only affected streaming/tool state and reuses parsed metadata on locale changes', () => {
+    const input = state()
+    const details: NonNullable<AgentItem['details']> = { type:'mcpToolCall',server:'test',tool:'inspect',result:{ content:[
+      { type:'text',text:'{"imageTitle":{"en":"Camera","zh":"\\u76f8\\u673a"}}' },
+      { type:'image',mimeType:'image/png',data:'AA==',width:1,height:1 },
+    ] } }
+    input.items = [item({ id:'old',turnId:'old',role:'tool',status:'completed',details }),
+      item({ id:'active-tool',role:'tool',status:'running',details }),item(),
+      item({ id:'text-tool',turnId:'old',role:'tool',status:'completed',title:'Text tool',details:{ type:'mcpToolCall',server:'test',tool:'text',result:{ content:[{ type:'text',text:'{"plain":true}' }] } } })]
+    const projector = createNativeTimelineProjector()
+    const parse = vi.spyOn(JSON,'parse')
+    const live = nativeConversationModel(input,'en',projector)
+    expect(parse).toHaveBeenCalledTimes(1)
+    parse.mockClear()
+    const disconnected = nativeConversationModel({ ...input,worker:'disconnected',activeTurnId:'' },'en',projector)
+    expect(disconnected.items[0]).toBe(live.items[0])
+    expect(disconnected.items[1]).toMatchObject({ status:'Completion unconfirmed',tone:'warning' })
+    expect(disconnected.items[2]).toMatchObject({ streaming:false })
+    expect(parse).not.toHaveBeenCalled()
+    const translated = nativeConversationModel({ ...input,worker:'disconnected',activeTurnId:'' },'zh',projector)
+    expect(translated.items[0]).not.toBe(disconnected.items[0])
+    expect(translated.items[0]).toMatchObject({ toolData:{ images:[{ label:'\u76f8\u673a' }] } })
+    expect(translated.items[2]).toBe(disconnected.items[2])
+    expect(translated.items[3]).toBe(disconnected.items[3])
+    expect(parse).not.toHaveBeenCalled()
+    const nextTurn = nativeConversationModel({ ...input,activeTurnId:'turn-b' },'zh',projector)
+    expect(nextTurn.items[0]).toBe(translated.items[0])
+    expect(nextTurn.items[1]).toMatchObject({ status:'\u5b8c\u6210\u7ed3\u679c\u672a\u786e\u8ba4' })
+    expect(parse).not.toHaveBeenCalled()
+    const otherSession = nativeConversationModel({ ...input,sessionId:'other-session' },'en',projector)
+    expect(otherSession.items[0].id).not.toBe(live.items[0].id)
+    expect(parse).toHaveBeenCalledTimes(1)
+    parse.mockRestore()
   })
 })

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	xrpc "github.com/XGC-Team/xgc2-xrpc/go"
@@ -18,16 +19,20 @@ import (
 const MaxSessions = 128
 const MaxEvents = 100000
 
-// replayPage is how many events one storage read returns to a subscriber.
-const replayPage = 256
+// replayPage and replayBytes bound the events held by a stalled subscriber.
+const replayPage = 32
+const replayBytes = 4 << 20
 
 type pendingInput struct {
-	request   Request
-	answer    *Answer
-	answerSeq uint64
-	value     chan Answer
-	active    bool
-	cancel    context.CancelFunc
+	request      Request
+	answer       *Answer
+	answerSeq    uint64
+	receipt      *DecisionReceipt
+	requestBytes int
+	receiptBytes int
+	value        chan Answer
+	active       bool
+	cancel       context.CancelFunc
 }
 
 // turnRecord is what a live conversation remembers of a prompt it accepted: the
@@ -39,15 +44,30 @@ type turnRecord struct {
 }
 type liveSession struct {
 	mu                  sync.Mutex
+	broker              *Broker
+	retiring            bool
+	retirementPersisted bool
+	retiredThrough      uint64
+	retireDriver        Driver
+	stopClose           chan struct{}
+	stopCloseErr        error
+	readers             int
+	subscribers         int
+	seedLeaseUntil      time.Time
 	id                  string
 	stopping            bool
 	opening             context.CancelFunc
 	info                Session
 	store               *Store
 	queueSeq            uint64
+	queueBytes          int
 	submittedQueueTurns []string
 	runtimeClosing      bool
 	bytes               int64
+	updatedAt           string
+	reservedControl     int64
+	currentView         *currentTurnView
+	turnCount           uint64
 	storageErr          error
 	changed             chan struct{}
 	driver              Driver
@@ -59,6 +79,7 @@ type liveSession struct {
 	lastTurnStatus      string
 	queue               PromptQueue
 	inputs              map[string]*pendingInput
+	activeInputs        map[string]*pendingInput
 	turns               map[string]turnRecord
 	profile             Profile
 	// The journal (journal.go): events numbered but not committed yet, the
@@ -74,10 +95,20 @@ type liveSession struct {
 	flushed      chan struct{}
 }
 type Broker struct {
-	mu                sync.Mutex
-	store             *Store
-	profiles          map[string]Profile
-	sessions          map[string]*liveSession
+	mu       sync.Mutex
+	store    *Store
+	profiles map[string]Profile
+	sessions map[string]*liveSession
+	// The catalog and attention index contain references to the existing
+	// sessions, not another copy of their transcript or mutable state.
+	catalog           map[ContextRef][]*liveSession
+	allSessions       []*liveSession
+	attention         sync.Map
+	historyBytes      atomic.Int64
+	retentionSlot     chan struct{}
+	retentionRunning  bool
+	retiringCount     int
+	readers           int
 	creating          map[string]chan struct{}
 	prepare           Prepare
 	factory           Factory
@@ -103,7 +134,7 @@ func NewBroker(store *Store, profiles []Profile, prepare Prepare, factory Factor
 	if len(files) == 1 && files[0] != nil {
 		ctx = WithNativeFiles(ctx, files[0])
 	}
-	b := &Broker{ctx: ctx, cancel: cancel, store: store, profiles: map[string]Profile{}, sessions: map[string]*liveSession{}, creating: map[string]chan struct{}{}, prepare: prepare, factory: factory}
+	b := &Broker{ctx: ctx, cancel: cancel, store: store, profiles: map[string]Profile{}, sessions: map[string]*liveSession{}, catalog: map[ContextRef][]*liveSession{}, creating: map[string]chan struct{}{}, retentionSlot: make(chan struct{}, 1), prepare: prepare, factory: factory}
 	for _, p := range profiles {
 		if _, ok := b.profiles[p.ID]; ok {
 			cancel()
@@ -123,22 +154,48 @@ func NewBroker(store *Store, profiles []Profile, prepare Prepare, factory Factor
 	for _, loaded := range records {
 		record := loaded.sessionRecord
 		s := newSession(record.Session, store)
+		s.broker = b
 		s.durable, s.version = record.LastSeq, loaded.version
 		s.profile = record.ProfileSnapshot
 		s.bytes = record.Bytes
+		s.updatedAt = record.UpdatedAt
+		b.historyBytes.Add(record.Bytes)
+		s.retiring = record.Retiring
+		if record.Retiring {
+			b.retiringCount++
+		}
+		s.retirementPersisted = record.Retiring
+		s.retiredThrough = record.RetiredThrough
+		s.stopping = record.Retiring
 		s.queueSeq = record.QueueSeq
+		if record.QueueSeq > 0 {
+			s.queue = PromptQueue{Revision: record.QueueRevision, Paused: record.QueuePaused, Items: []QueuedPrompt{}}
+			s.queueBytes = 256
+		}
 		s.submittedQueueTurns = record.SubmittedQueueTurns
 		s.lastTurnStatus = record.LastTurnStatus
-		if record.QueueSeq > 0 {
+		s.turnCount = record.TurnCount
+		if record.QueueCount > 0 && !record.Retiring {
 			events, err := store.readEvents(record.ID, record.QueueSeq-1, record.QueueSeq)
 			if err != nil || events[0].Queue == nil {
 				cancel()
 				return nil, errors.Join(errors.New("persisted queue unavailable"), err)
 			}
 			s.queue = cloneQueue(*events[0].Queue)
+			encoded, err := json.Marshal(events[0])
+			if err != nil {
+				cancel()
+				return nil, err
+			}
+			s.queueBytes = len(encoded)
 			for _, turn := range record.SubmittedQueueTurns {
 				s.applyQueueEventLocked(Event{Kind: "item.snapshot", Role: "user", Status: "submitted", TurnID: turn})
 			}
+			if len(s.queue.Items) != record.QueueCount || s.queue.Revision != record.QueueRevision {
+				cancel()
+				return nil, errors.New("persisted queue state mismatch")
+			}
+			s.queue.Paused = record.QueuePaused
 		}
 		b.sessions[s.info.ID] = s
 		if len(s.queue.Items) > 0 {
@@ -151,7 +208,12 @@ func NewBroker(store *Store, profiles []Profile, prepare Prepare, factory Factor
 			// recorded outcome and history; a full session cannot block all history.
 			s.info.State = "disconnected"
 		}
+		if !s.retiring {
+			b.indexSessionLocked(s)
+			s.indexAttentionLocked()
+		}
 	}
+	b.scheduleRetention()
 	return b, nil
 }
 
@@ -159,11 +221,14 @@ func newSession(info Session, store *Store) *liveSession {
 	if info.MetadataRevision == 0 {
 		info.MetadataRevision = 1
 	}
-	return &liveSession{id: info.ID, info: info, store: store, changed: make(chan struct{}), flushed: make(chan struct{}), wake: make(chan struct{}, 1), inputs: map[string]*pendingInput{}, turns: map[string]turnRecord{}}
+	if info.CreatedAt == "" {
+		info.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	return &liveSession{id: info.ID, info: info, updatedAt: info.CreatedAt, store: store, changed: make(chan struct{}), flushed: make(chan struct{}), wake: make(chan struct{}, 1), inputs: map[string]*pendingInput{}, activeInputs: map[string]*pendingInput{}, turns: map[string]turnRecord{}}
 }
 
 func (s *liveSession) record() sessionRecord {
-	return sessionRecord{Session: s.info, ProfileSnapshot: s.profile, Bytes: s.bytes, QueueSeq: s.queueSeq, SubmittedQueueTurns: append([]string{}, s.submittedQueueTurns...), LastTurnStatus: s.lastTurnStatus}
+	return sessionRecord{Session: s.info, ProfileSnapshot: s.profile, Bytes: s.bytes, UpdatedAt: s.updatedAt, QueueSeq: s.queueSeq, QueueRevision: s.queue.Revision, QueueCount: len(s.queue.Items), QueuePaused: s.queue.Paused, SubmittedQueueTurns: append([]string{}, s.submittedQueueTurns...), LastTurnStatus: s.lastTurnStatus, TurnCount: s.turnCount, Retiring: s.retirementPersisted, RetiredThrough: s.retiredThrough}
 }
 
 func (b *Broker) Providers(ctx context.Context) ([]Provider, error) {
@@ -256,6 +321,7 @@ func (b *Broker) Create(ctx context.Context, key string, c Create) (Session, err
 	}
 	info := Session{SchemaVersion: Schema, ID: id, Scope: c, Provider: p.Provider, State: "starting", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), Options: p.Defaults, MetadataRevision: 1, RuntimeID: "r_" + randomID()}
 	s := newSession(info, b.store)
+	s.broker = b
 	s.profile = p
 	// The record is written without the broker lock; a repeated create waits
 	// here for its outcome.
@@ -276,9 +342,12 @@ func (b *Broker) Create(ctx context.Context, key string, c Create) (Session, err
 	}
 	s.version = version
 	b.sessions[id] = s
+	b.indexSessionLocked(s)
+	s.indexAttentionLocked()
 	b.wg.Add(1)
 	b.mu.Unlock()
 	go func() { defer b.wg.Done(); b.connect(ctx, s, p, true, info.RuntimeID) }()
+	b.scheduleRetention()
 	return info, nil
 }
 
@@ -301,13 +370,18 @@ func (b *Broker) createdSession(ctx context.Context, id string, c Create) (Sessi
 			}
 		}
 		existing := b.sessions[id]
-		b.mu.Unlock()
+		if existing != nil && existing.retiring {
+			b.mu.Unlock()
+			return Session{}, true, ErrUnavailable
+		}
 		if existing == nil {
+			b.mu.Unlock()
 			return Session{}, false, nil
 		}
 		existing.mu.Lock()
 		info := existing.info
 		existing.mu.Unlock()
+		b.mu.Unlock()
 		if info.Scope != c {
 			return Session{}, true, ErrConflict
 		}
@@ -405,7 +479,7 @@ func (b *Broker) receive(s *liveSession, e Event) error {
 			return ErrStale
 		}
 		s.ended = true
-		for _, p := range s.inputs {
+		for _, p := range s.activeInputs {
 			if p.active {
 				p.cancel()
 			}
@@ -428,40 +502,45 @@ func (b *Broker) get(id string) (*liveSession, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	s := b.sessions[id]
-	if s == nil {
+	if s == nil || s.retiring {
 		return nil, ErrNotFound
 	}
 	return s, nil
 }
-func (b *Broker) Get(_ context.Context, id string) (Session, error) {
-	s, err := b.get(id)
-	if err != nil {
+func (b *Broker) Get(ctx context.Context, id string) (Session, error) {
+	if err := ctx.Err(); err != nil {
 		return Session{}, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.info, nil
-}
-func (b *Broker) list() []Session {
 	b.mu.Lock()
-	sessions := make([]*liveSession, 0, len(b.sessions))
-	for _, s := range b.sessions {
-		sessions = append(sessions, s)
+	s := b.sessions[id]
+	if s == nil || s.retiring {
+		b.mu.Unlock()
+		return Session{}, ErrNotFound
 	}
+	s.mu.Lock()
+	info := s.info
+	s.mu.Unlock()
 	b.mu.Unlock()
-	result := []Session{}
-	for _, s := range sessions {
-		s.mu.Lock()
-		result = append(result, s.info)
-		s.mu.Unlock()
+	return info, nil
+}
+
+// CleanupScope lets the authenticated host authorize continuation of an
+// interrupted cleanup without publishing a partly retired conversation.
+func (b *Broker) CleanupScope(ctx context.Context, id string) (ContextRef, error) {
+	if err := ctx.Err(); err != nil {
+		return ContextRef{}, err
 	}
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].CreatedAt == result[j].CreatedAt {
-			return result[i].ID > result[j].ID
-		}
-		return result[i].CreatedAt > result[j].CreatedAt
-	})
-	return result
+	b.mu.Lock()
+	s := b.sessions[id]
+	if s == nil {
+		b.mu.Unlock()
+		return ContextRef{}, ErrNotFound
+	}
+	s.mu.Lock()
+	ref := s.info.Scope.Context
+	s.mu.Unlock()
+	b.mu.Unlock()
+	return ref, nil
 }
 func (b *Broker) Prompt(ctx context.Context, id, key string, request PromptRequest) (string, error) {
 	prompt, options := request.Text, request.Options
@@ -543,7 +622,7 @@ func (b *Broker) open(id string) (*liveSession, error) {
 		return nil, ErrUnavailable
 	}
 	s := b.sessions[id]
-	if s == nil {
+	if s == nil || s.retiring {
 		return nil, ErrNotFound
 	}
 	return s, nil
@@ -557,6 +636,25 @@ func turnIdentity(id, key string) string { return "t_" + hash(id + "\x00" + key)
 // failure that ended the turn before it started. Caller owns both broker and
 // session locks.
 func (b *Broker) startPromptLocked(s *liveSession, turn, prompt string, options, selected AgentOptions) (<-chan error, error) {
+	if s.storageErr != nil {
+		return nil, s.storageErr
+	}
+	// Reserve the following running-state event before accepting the user
+	// message. Concurrent conversations cannot consume this space between the
+	// two appends and turn an accepted prompt into an unsent replay.
+	const controlBytes = int64(4096)
+	if s.broker != nil && !s.broker.reserveHistory(controlBytes) {
+		return nil, exhausted("retained history byte capacity reached")
+	}
+	s.reservedControl = controlBytes
+	defer func() {
+		if s.reservedControl != 0 {
+			if s.broker != nil {
+				s.broker.historyBytes.Add(-s.reservedControl)
+			}
+			s.reservedControl = 0
+		}
+	}()
 	s.current = turn
 	s.ended = false
 	s.lastTurnStatus = ""
@@ -612,7 +710,7 @@ func (b *Broker) runTurn(ctx context.Context, cancel context.CancelFunc, s *live
 	if err != nil {
 		_ = s.appendLocked(Event{Kind: "notice", TurnID: turn, Status: "error", Text: "The turn failed or disconnected. Check the client for authentication, quota, or runtime issues."})
 	}
-	for _, p := range s.inputs {
+	for _, p := range s.activeInputs {
 		if p.active {
 			p.cancel()
 		}
@@ -637,6 +735,7 @@ func (b *Broker) runTurn(ctx context.Context, cancel context.CancelFunc, s *live
 		_ = driver.Close()
 	}
 	b.drainQueue(s.id)
+	b.scheduleRetention()
 }
 func (b *Broker) ask(s *liveSession, ctx context.Context, r Request) (Answer, error) {
 	return b.askRuntime(s, ctx, r, "")
@@ -660,13 +759,7 @@ func (b *Broker) askRuntime(s *liveSession, ctx context.Context, r Request, runt
 		s.mu.Unlock()
 		return Answer{}, ErrStale
 	}
-	active := 0
-	for _, p := range s.inputs {
-		if p.active {
-			active++
-		}
-	}
-	if active >= 16 {
+	if len(s.activeInputs) >= 16 {
 		s.mu.Unlock()
 		return Answer{}, exhausted("too many pending user requests")
 	}
@@ -674,10 +767,20 @@ func (b *Broker) askRuntime(s *liveSession, ctx context.Context, r Request, runt
 	r.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	p := &pendingInput{request: r, value: make(chan Answer, 1), active: true, cancel: cancel}
 	s.inputs[r.ID] = p
+	s.activeInputs[r.ID] = p
 	turn := s.current
 	err := s.appendLocked(Event{Kind: "input.request", TurnID: turn, ItemID: r.ID, Request: &r})
 	if err == nil {
+		p.requestBytes = len(s.pending[len(s.pending)-1].data)
+	}
+	if err == nil {
 		err = s.appendLocked(Event{Kind: "session.state", Status: "awaiting-input", TurnID: turn})
+	}
+	if err != nil {
+		p.active = false
+		delete(s.inputs, r.ID)
+		delete(s.activeInputs, r.ID)
+		s.indexAttentionLocked()
 	}
 	info, runtimeCwd := s.info, s.cwd
 	s.mu.Unlock()
@@ -696,6 +799,8 @@ func (b *Broker) askRuntime(s *liveSession, ctx context.Context, r Request, runt
 	}
 	s.mu.Lock()
 	p.active = false
+	delete(s.activeInputs, r.ID)
+	s.indexAttentionLocked()
 	status := "answered"
 	if err != nil {
 		status = "expired"
@@ -703,12 +808,7 @@ func (b *Broker) askRuntime(s *liveSession, ctx context.Context, r Request, runt
 	}
 	_ = s.appendLocked(Event{Kind: "input.resolved", TurnID: turn, ItemID: r.ID, Status: status})
 	seq := s.info.LastSeq
-	remaining := false
-	for _, p := range s.inputs {
-		if p.active {
-			remaining = true
-		}
-	}
+	remaining := len(s.activeInputs) > 0
 	if !remaining && s.current == turn && !s.ended && s.info.State == "awaiting-input" {
 		_ = s.appendLocked(Event{Kind: "session.state", Status: "running", TurnID: turn})
 	}
@@ -751,11 +851,14 @@ func (b *Broker) Answer(ctx context.Context, id, requestID string, a Answer) err
 	}
 	// The journal records that a response was submitted, not that the provider
 	// granted permission or the tool succeeded. Never persist free-form answers.
-	if err = s.appendLocked(Event{Kind: "input.submitted", ItemID: requestID, Status: "submitted", Decision: decisionReceipt(ctx, p.request, a)}); err != nil {
+	receipt := decisionReceipt(ctx, p.request, a)
+	if err = s.appendLocked(Event{Kind: "input.submitted", ItemID: requestID, Status: "submitted", Decision: receipt}); err != nil {
 		s.mu.Unlock()
 		return err
 	}
 	p.answer = &a
+	p.receipt = receipt
+	p.receiptBytes = len(s.pending[len(s.pending)-1].data)
 	p.answerSeq = s.info.LastSeq
 	s.mu.Unlock()
 	// The receipt is durable before the native client sees the answer.
@@ -793,7 +896,7 @@ func (b *Broker) Cancel(ctx context.Context, id string) error {
 	if s.current != turn || s.ended || s.stopping || s.info.State == "cancelling" {
 		return nil // the turn ended on its own while the stop was delivered
 	}
-	for _, p := range s.inputs {
+	for _, p := range s.activeInputs {
 		if p.active {
 			p.cancel()
 		}
@@ -819,7 +922,7 @@ func (b *Broker) Reconnect(ctx context.Context, id string) error {
 		return ErrNotFound
 	}
 	s.mu.Lock()
-	if (s.info.State != "disconnected" && s.info.State != "closed") || s.current != "" || s.storageErr != nil || s.opening != nil || s.runtimeClosing || s.info.Archived {
+	if s.stopping || (s.info.State != "disconnected" && s.info.State != "closed") || s.current != "" || s.storageErr != nil || s.opening != nil || s.runtimeClosing || s.info.Archived {
 		s.mu.Unlock()
 		b.mu.Unlock()
 		return ErrConflict
@@ -869,13 +972,24 @@ func (b *Broker) CloseSession(_ context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	return s.waitDurable(context.Background(), seq)
+	err = s.waitDurable(context.Background(), seq)
+	if err == nil {
+		b.scheduleRetention()
+	}
+	return err
 }
 
 // replay is bounded per response, cursor-checked and scoped to one conversation.
 // Subscribers reconnect to this log, never to Prompt. It reads what is committed
 // from storage, without any lock, and the rest from the journal's pending list.
 func (b *Broker) replay(id string, after uint64) ([]Event, <-chan struct{}, error) {
+	return b.replayContext(context.Background(), id, after)
+}
+
+func (b *Broker) replayContext(ctx context.Context, id string, after uint64) ([]Event, <-chan struct{}, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
 	s, err := b.get(id)
 	if err != nil {
 		return nil, nil, err
@@ -886,12 +1000,14 @@ func (b *Broker) replay(id string, after uint64) ([]Event, <-chan struct{}, erro
 		return nil, nil, ErrCursor
 	}
 	end := min(s.info.LastSeq, after+replayPage)
-	tail, durable := s.tailLocked(after, end)
+	durable := s.durable
+	tail, sizes := s.tailLocked(after, end)
 	changed, failure := s.changed, s.storageErr
 	s.mu.Unlock()
 	var result []Event
+	bytes := 0
 	if after < durable {
-		if result, err = s.store.readEvents(id, after, min(end, durable)); err != nil {
+		if result, bytes, err = s.store.readReplay(ctx, id, after, min(end, durable)); err != nil {
 			return nil, nil, err
 		}
 		for _, event := range result {
@@ -900,19 +1016,38 @@ func (b *Broker) replay(id string, after uint64) ([]Event, <-chan struct{}, erro
 			}
 		}
 	}
-	result = append(result, tail...)
+	last := after
+	if len(result) > 0 {
+		last = result[len(result)-1].Seq
+	}
+	for i, event := range tail {
+		if event.Seq != last+1 || len(result) >= replayPage || (len(result) > 0 && bytes+sizes[i] > replayBytes) {
+			break
+		}
+		result = append(result, event)
+		bytes += sizes[i]
+		last = event.Seq
+	}
 	if len(result) == 0 && failure != nil {
 		return nil, nil, failure
 	}
 	return result, changed, nil
 }
 func (b *Broker) Subscribe(ctx context.Context, id string, after uint64, emit func(Event) error) error {
+	_, release, err := b.retainReader(id, true)
+	if err != nil {
+		return err
+	}
+	defer release()
 	for {
-		events, changed, err := b.replay(id, after)
+		events, changed, err := b.replayContext(ctx, id, after)
 		if err != nil {
 			return err
 		}
 		for _, e := range events {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			if err = emit(e); err != nil {
 				return err
 			}
@@ -943,11 +1078,12 @@ func (b *Broker) Close() error {
 		sessions = append(sessions, s)
 	}
 	b.mu.Unlock()
+	var closeErr error
 	for _, s := range sessions {
 		s.mu.Lock()
 		s.stopping = true
 		driver, cancel := s.driver, s.cancel
-		for _, p := range s.inputs {
+		for _, p := range s.activeInputs {
 			if p.active {
 				p.cancel()
 			}
@@ -955,12 +1091,13 @@ func (b *Broker) Close() error {
 		if s.info.State != "closed" && s.info.State != "disconnected" {
 			_ = s.appendLocked(Event{Kind: "session.state", Status: "disconnected", Text: "Local host stopped; no automatic task retry."})
 		}
+		closing := s.stopClose
 		s.mu.Unlock()
 		if cancel != nil {
 			cancel()
 		}
-		if driver != nil {
-			_ = driver.Close()
+		if driver != nil && closing == nil {
+			closeErr = errors.Join(closeErr, driver.Close())
 		}
 	}
 	// Wait for all opens and active turn finalizers before retiring the host.
@@ -969,17 +1106,39 @@ func (b *Broker) Close() error {
 	ctx, stop := context.WithTimeout(context.Background(), closeFlushTimeout)
 	defer stop()
 	var flushing sync.WaitGroup
+	var flushMu sync.Mutex
 	for _, s := range sessions {
 		flushing.Add(1)
-		go func() { defer flushing.Done(); _ = s.flushAll(ctx) }()
+		go func() {
+			defer flushing.Done()
+			if err := s.flushAll(ctx); err != nil {
+				flushMu.Lock()
+				closeErr = errors.Join(closeErr, err)
+				flushMu.Unlock()
+			}
+		}()
 	}
 	flushing.Wait()
 	for _, s := range sessions {
 		s.mu.Lock()
+		done := s.stopClose
+		s.mu.Unlock()
+		if done != nil {
+			select {
+			case <-done:
+				s.mu.Lock()
+				closeErr = errors.Join(closeErr, s.stopCloseErr)
+				s.mu.Unlock()
+			case <-ctx.Done():
+				closeErr = errors.Join(closeErr, ctx.Err())
+			}
+		}
+		s.mu.Lock()
+		s.releaseHistoryLocked()
 		s.storageErr = ErrUnavailable
 		s.mu.Unlock()
 	}
-	return nil
+	return closeErr
 }
 
 // closeFlushTimeout bounds how long Close waits for the last commits.

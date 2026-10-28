@@ -67,7 +67,10 @@ func TestPersistedPromptOptionsReplayKeepsJournalAndIdempotency(t *testing.T) {
 		}
 		live.version = version
 		for _, event := range events {
-			if err := live.appendLocked(event); err != nil {
+			live.mu.Lock()
+			err := live.appendLocked(event)
+			live.mu.Unlock()
+			if err != nil {
 				t.Fatal(err)
 			}
 		}

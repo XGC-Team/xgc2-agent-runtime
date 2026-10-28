@@ -120,6 +120,9 @@ func storageError(err error) error {
 	if (errors.As(err, &domain) && domain.Code == "conflict") || (errors.As(err, &call) && call.Code == "conflict") {
 		return errors.Join(ErrConflict, err)
 	}
+	if (errors.As(err, &domain) && domain.Code == "resource_exhausted") || (errors.As(err, &call) && call.Code == "resource_exhausted") {
+		return errors.Join(ErrCapacity, err)
+	}
 	return err
 }
 
@@ -159,9 +162,16 @@ type sessionRecord struct {
 	Session
 	ProfileSnapshot     Profile  `json:"profileSnapshot"`
 	Bytes               int64    `json:"bytes"`
+	UpdatedAt           string   `json:"updatedAt"`
 	QueueSeq            uint64   `json:"queueSeq,omitempty"`
+	QueueRevision       uint64   `json:"queueRevision"`
+	QueueCount          int      `json:"queueCount"`
+	QueuePaused         bool     `json:"queuePaused"`
 	SubmittedQueueTurns []string `json:"submittedQueueTurns,omitempty"`
 	LastTurnStatus      string   `json:"lastTurnStatus,omitempty"`
+	TurnCount           uint64   `json:"turnCount"`
+	Retiring            bool     `json:"retiring,omitempty"`
+	RetiredThrough      uint64   `json:"retiredThrough,omitempty"`
 }
 
 func eventKey(id string, seq uint64) string { return fmt.Sprintf("%s.%012d", id, seq) }
@@ -272,8 +282,11 @@ func (s *Store) records(ctx context.Context) ([]persistedSession, error) {
 		}
 		for _, row := range read.Results[0].Records {
 			var record sessionRecord
-			if json.Unmarshal(row.Data, &record) != nil || row.Key != record.ID || record.SchemaVersion != Schema || !safeID.MatchString(record.ID) || record.Scope.Validate() != nil || record.LastSeq > MaxEvents || record.Bytes < 0 || record.Bytes > MaxSessionBytes || record.QueueSeq > record.LastSeq || len(record.SubmittedQueueTurns) > maxQueuedPrompts || record.MetadataRevision == 0 || record.ProfileSnapshot.ID != record.Scope.ProfileID || record.ProfileSnapshot.Provider != record.Provider {
+			if json.Unmarshal(row.Data, &record) != nil || row.Key != record.ID || record.SchemaVersion != Schema || !safeID.MatchString(record.ID) || record.Scope.Validate() != nil || record.LastSeq > MaxEvents || record.TurnCount > record.LastSeq || record.Bytes < 0 || record.Bytes > MaxSessionBytes || record.QueueSeq > record.LastSeq || record.QueueCount < 0 || record.QueueCount > maxQueuedPrompts || (record.QueueSeq == 0 && (record.QueueCount != 0 || record.QueueRevision != 0)) || (record.QueueSeq > 0 && record.QueueRevision == 0) || record.RetiredThrough > record.LastSeq || (!record.Retiring && record.RetiredThrough != 0) || len(record.SubmittedQueueTurns) > maxQueuedPrompts || record.MetadataRevision == 0 || record.ProfileSnapshot.ID != record.Scope.ProfileID || record.ProfileSnapshot.Provider != record.Provider {
 				return nil, errors.New("agent-runtime: invalid persisted conversation")
+			}
+			if _, err := time.Parse(time.RFC3339Nano, record.UpdatedAt); err != nil {
+				return nil, errors.New("agent-runtime: invalid persisted conversation activity time")
 			}
 			if _, err := commandArgs(record.Provider); err != nil {
 				return nil, err
@@ -331,8 +344,12 @@ func (s *Store) eventPage(id string, keys []string, first uint64) ([]Event, erro
 	if err != nil {
 		return nil, err
 	}
-	result := make([]Event, 0, len(keys))
-	for i, row := range read.Results[0].Records {
+	return decodeEventRows(id, first, read.Results[0].Records)
+}
+
+func decodeEventRows(id string, first uint64, rows []api.Record) ([]Event, error) {
+	result := make([]Event, 0, len(rows))
+	for i, row := range rows {
 		var event Event
 		if row.Missing || row.Deleted || json.Unmarshal(row.Data, &event) != nil || event.SchemaVersion != Schema || event.SessionID != id || event.Seq != first+uint64(i) {
 			return nil, errors.New("agent-runtime: persisted event range unavailable")
@@ -340,6 +357,59 @@ func (s *Store) eventPage(id string, keys []string, first uint64) ([]Event, erro
 		result = append(result, event)
 	}
 	return result, nil
+}
+
+// readReplay returns one bounded, consecutive chunk. When a proposed batch
+// exceeds Storage's response budget it reads only the first half; it never
+// accumulates both halves in a detached reader.
+func (s *Store) readReplay(ctx context.Context, id string, after, end uint64) ([]Event, int, error) {
+	n := int(end - after)
+	for n > 0 {
+		keys := make([]string, n)
+		for i := range keys {
+			keys[i] = eventKey(id, after+1+uint64(i))
+		}
+		read, err := s.snapshot(ctx, []api.Query{{Collection: "events", Keys: keys}}, nil)
+		var domain *api.Error
+		var call *xrpc.CallError
+		if err != nil && n > 1 && ((errors.As(err, &domain) && domain.Code == "resource_exhausted") || (errors.As(err, &call) && call.Code == "resource_exhausted")) {
+			n = (n + 1) / 2
+			continue
+		}
+		if err != nil {
+			return nil, 0, err
+		}
+		bytes := 0
+		for _, row := range read.Results[0].Records {
+			bytes += len(row.Data)
+		}
+		events, err := decodeEventRows(id, after+1, read.Results[0].Records)
+		return events, bytes, err
+	}
+	return nil, 0, nil
+}
+
+// readHistory keeps the newest part of an oversized candidate page.
+func (s *Store) readHistory(ctx context.Context, id string, end uint64, n int) ([]Event, error) {
+	for n > 0 {
+		first := end - uint64(n) + 1
+		keys := make([]string, n)
+		for i := range keys {
+			keys[i] = eventKey(id, first+uint64(i))
+		}
+		read, err := s.snapshot(ctx, []api.Query{{Collection: "events", Keys: keys}}, nil)
+		var domain *api.Error
+		var call *xrpc.CallError
+		if err != nil && n > 1 && ((errors.As(err, &domain) && domain.Code == "resource_exhausted") || (errors.As(err, &call) && call.Code == "resource_exhausted")) {
+			n = (n + 1) / 2
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		return decodeEventRows(id, first, read.Results[0].Records)
+	}
+	return nil, nil
 }
 
 func (s *Store) prompt(id, turn string) (string, bool, error) {

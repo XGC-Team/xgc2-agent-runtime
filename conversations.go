@@ -79,7 +79,7 @@ func (b *Broker) UpdateMetadata(_ context.Context, id string, update MetadataUpd
 // Caller holds s.mu. Runtime teardown is fenced until Close has completed, so
 // an old provider cannot publish into a newly resumed conversation.
 func (s *liveSession) retireRuntimeLocked() (func(), error) {
-	if s.runtimeClosing {
+	if s.runtimeClosing || s.stopping {
 		return func() {}, ErrConflict
 	}
 	if s.info.State == "closed" {
@@ -89,7 +89,7 @@ func (s *liveSession) retireRuntimeLocked() (func(), error) {
 	s.runtimeClosing = true
 	driver, cancel, opening := s.driver, s.cancel, s.opening
 	s.driver = nil
-	for _, p := range s.inputs {
+	for _, p := range s.activeInputs {
 		if p.active {
 			p.cancel()
 		}
@@ -118,13 +118,13 @@ func (s *liveSession) releaseHistoryLocked() {
 	if s.current != "" || s.opening != nil || (s.info.State != "closed" && s.info.State != "disconnected") {
 		return
 	}
-	for _, input := range s.inputs {
-		if input.active {
-			return
-		}
+	if len(s.activeInputs) > 0 {
+		return
 	}
 	s.turns = map[string]turnRecord{}
 	s.inputs = map[string]*pendingInput{}
+	s.activeInputs = map[string]*pendingInput{}
+	s.currentView = nil
 }
 
 // Must be called while b.mu is held, before locking the candidate session.
@@ -159,7 +159,26 @@ type sessionListCursor struct {
 	Context   ContextRef `json:"context"`
 }
 
-func (b *Broker) List(_ context.Context, options SessionListOptions) (SessionPage, error) {
+// sessionBefore orders the immutable creation identities newest first.
+func sessionBefore(a *liveSession, created, id string) bool {
+	return a.info.CreatedAt > created || (a.info.CreatedAt == created && a.id > id)
+}
+
+// Caller holds b.mu (or is constructing the broker before publication).
+func (b *Broker) indexSessionLocked(s *liveSession) {
+	insert := func(index []*liveSession) []*liveSession {
+		i := sort.Search(len(index), func(i int) bool { return !sessionBefore(index[i], s.info.CreatedAt, s.id) })
+		index = append(index, nil)
+		copy(index[i+1:], index[i:])
+		index[i] = s
+		return index
+	}
+	b.allSessions = insert(b.allSessions)
+	ref := s.info.Scope.Context
+	b.catalog[ref] = insert(b.catalog[ref])
+}
+
+func (b *Broker) List(ctx context.Context, options SessionListOptions) (SessionPage, error) {
 	if options.Limit == 0 {
 		options.Limit = 50
 	}
@@ -169,26 +188,41 @@ func (b *Broker) List(_ context.Context, options SessionListOptions) (SessionPag
 	}
 	var cursor sessionListCursor
 	if options.After != "" {
+		if len(options.After) > 1400 {
+			return SessionPage{}, invalid("invalid conversation list cursor")
+		}
 		data, err := base64.RawURLEncoding.DecodeString(options.After)
 		if err != nil || len(data) > 1024 || json.Unmarshal(data, &cursor) != nil || !safeID.MatchString(cursor.ID) || cursor.CreatedAt == "" || cursor.Context != options.Context {
 			return SessionPage{}, invalid("invalid conversation list cursor")
 		}
 	}
-	page := SessionPage{Sessions: []Session{}}
-	for _, session := range b.list() {
-		if options.Context.Kind != "" && session.Scope.Context != options.Context {
-			continue
-		}
-		if cursor.ID != "" && (session.CreatedAt > cursor.CreatedAt || (session.CreatedAt == cursor.CreatedAt && session.ID >= cursor.ID)) {
-			continue
-		}
-		if len(page.Sessions) == options.Limit {
-			last := page.Sessions[len(page.Sessions)-1]
-			data, _ := json.Marshal(sessionListCursor{last.CreatedAt, last.ID, options.Context})
-			page.NextCursor = base64.RawURLEncoding.EncodeToString(data)
-			break
-		}
-		page.Sessions = append(page.Sessions, session)
+	if err := ctx.Err(); err != nil {
+		return SessionPage{}, err
+	}
+	b.mu.Lock()
+	index := b.allSessions
+	if options.Context.Kind != "" {
+		index = b.catalog[options.Context]
+	}
+	start := 0
+	if cursor.ID != "" {
+		start = sort.Search(len(index), func(i int) bool {
+			return !sessionBefore(index[i], cursor.CreatedAt, cursor.ID) && (index[i].info.CreatedAt != cursor.CreatedAt || index[i].id != cursor.ID)
+		})
+	}
+	end := min(len(index), start+options.Limit)
+	more := end < len(index)
+	page := SessionPage{Sessions: make([]Session, 0, end-start)}
+	for _, s := range index[start:end] {
+		s.mu.Lock()
+		page.Sessions = append(page.Sessions, s.info)
+		s.mu.Unlock()
+	}
+	b.mu.Unlock()
+	if more {
+		last := page.Sessions[len(page.Sessions)-1]
+		data, _ := json.Marshal(sessionListCursor{last.CreatedAt, last.ID, options.Context})
+		page.NextCursor = base64.RawURLEncoding.EncodeToString(data)
 	}
 	return page, nil
 }
@@ -198,15 +232,21 @@ type PendingRequest struct {
 	Submitted bool    `json:"submitted"`
 }
 
-func (b *Broker) Inputs(_ context.Context, id string) ([]PendingRequest, error) {
-	s, err := b.get(id)
-	if err != nil {
+func (b *Broker) Inputs(ctx context.Context, id string) ([]PendingRequest, error) {
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	b.mu.Lock()
+	s := b.sessions[id]
+	if s == nil || s.retiring {
+		b.mu.Unlock()
+		return nil, ErrNotFound
+	}
 	s.mu.Lock()
+	b.mu.Unlock()
 	defer s.mu.Unlock()
 	items := []PendingRequest{}
-	for _, p := range s.inputs {
+	for _, p := range s.activeInputs {
 		if p.active {
 			items = append(items, PendingRequest{Request: p.request, Submitted: p.answer != nil})
 		}
@@ -238,18 +278,99 @@ type AttentionSnapshot struct {
 	Revision string             `json:"revision"`
 }
 
-func (b *Broker) Attention(context.Context) (AttentionSnapshot, error) {
-	b.mu.Lock()
-	sessions := make([]*liveSession, 0, len(b.sessions))
-	for _, s := range b.sessions {
-		sessions = append(sessions, s)
+type HistoryOptions struct {
+	Before uint64
+	Limit  int
+}
+
+type HistoryPage struct {
+	Events     []Event `json:"events"`
+	LastSeq    uint64  `json:"lastSeq"`
+	NextBefore uint64  `json:"nextBefore,omitempty"`
+}
+
+func (b *Broker) History(ctx context.Context, id string, options HistoryOptions) (HistoryPage, error) {
+	if options.Limit == 0 {
+		options.Limit = replayPage
 	}
-	b.mu.Unlock()
+	if options.Limit < 1 || options.Limit > replayPage {
+		return HistoryPage{}, invalid("invalid history page limit")
+	}
+	if err := ctx.Err(); err != nil {
+		return HistoryPage{}, err
+	}
+	s, release, err := b.retainReader(id, false)
+	if err != nil {
+		return HistoryPage{}, err
+	}
+	defer release()
+	s.mu.Lock()
+	page := HistoryPage{Events: []Event{}, LastSeq: s.info.LastSeq}
+	if options.Before > page.LastSeq+1 {
+		s.mu.Unlock()
+		return HistoryPage{}, ErrCursor
+	}
+	end := page.LastSeq
+	if options.Before > 0 {
+		end = options.Before - 1
+	}
+	durable := s.durable
+	if end > durable {
+		bytes := 0
+		for i := len(s.pending) - 1; i >= 0 && len(page.Events) < options.Limit; i-- {
+			p := s.pending[i]
+			if p.event.Seq > end {
+				continue
+			}
+			if p.event.Seq <= durable || (len(page.Events) > 0 && bytes+len(p.data) > replayBytes) {
+				break
+			}
+			page.Events = append(page.Events, p.event)
+			bytes += len(p.data)
+		}
+		for i, j := 0, len(page.Events)-1; i < j; i, j = i+1, j-1 {
+			page.Events[i], page.Events[j] = page.Events[j], page.Events[i]
+		}
+	}
+	s.mu.Unlock()
+	if end > 0 && end <= durable {
+		n := min(options.Limit, int(end))
+		page.Events, err = s.store.readHistory(ctx, id, end, n)
+		if err != nil {
+			return HistoryPage{}, err
+		}
+	}
+	if len(page.Events) > 0 && page.Events[0].Seq > 1 {
+		page.NextBefore = page.Events[0].Seq
+	}
+	return page, nil
+}
+
+// indexAttentionLocked is called on state/input transitions, not for ordinary
+// output deltas. The index only contains sessions capable of needing attention.
+func (s *liveSession) indexAttentionLocked() {
+	if s.broker == nil {
+		return
+	}
+	live := s.info.State != "closed" && s.info.State != "disconnected" && !s.info.Archived
+	live = live || len(s.activeInputs) > 0
+	if live {
+		s.broker.attention.Store(s.id, s)
+	} else {
+		s.broker.attention.Delete(s.id)
+	}
+}
+
+func (b *Broker) Attention(ctx context.Context) (AttentionSnapshot, error) {
 	result := AttentionSnapshot{Sessions: []AttentionSession{}}
-	for _, s := range sessions {
+	b.attention.Range(func(_, value any) bool {
+		if ctx.Err() != nil {
+			return false
+		}
+		s := value.(*liveSession)
 		s.mu.Lock()
 		entry := AttentionSession{SessionID: s.info.ID, Context: s.info.Scope.Context, Workspace: s.info.Scope.Workspace, Worker: s.info.State, RuntimeID: s.info.RuntimeID, LastSeq: s.info.LastSeq, Pending: []AttentionRequest{}}
-		for _, p := range s.inputs {
+		for _, p := range s.activeInputs {
 			if p.active {
 				title := p.request.Title
 				if len(title) > 512 {
@@ -268,6 +389,10 @@ func (b *Broker) Attention(context.Context) (AttentionSnapshot, error) {
 			sort.Slice(entry.Pending, func(i, j int) bool { return entry.Pending[i].ID < entry.Pending[j].ID })
 			result.Sessions = append(result.Sessions, entry)
 		}
+		return true
+	})
+	if err := ctx.Err(); err != nil {
+		return AttentionSnapshot{}, err
 	}
 	sort.Slice(result.Sessions, func(i, j int) bool { return result.Sessions[i].SessionID < result.Sessions[j].SessionID })
 	data, _ := json.Marshal(result.Sessions)

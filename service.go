@@ -63,6 +63,18 @@ type Service interface {
 	EvaluateInputs(ctx context.Context, id string) error
 	// Attention summarizes the live workers and their pending requests.
 	Attention(ctx context.Context) (AttentionSnapshot, error)
+	// Current is an atomic, bounded projection and exact stream cursor for the
+	// selected conversation. Older records require explicit History reads.
+	Current(ctx context.Context, id string) (CurrentSeed, error)
+	// History reads one bounded suffix, in ascending sequence order. Before is
+	// exclusive; zero selects the newest event. Continue with NextBefore.
+	History(ctx context.Context, id string, options HistoryOptions) (HistoryPage, error)
+	// CleanupHistory retires an idle conversation in bounded, resumable batches.
+	// A concurrent cleanup is rejected with ErrCapacity instead of waiting.
+	CleanupHistory(ctx context.Context, id string) (HistoryCleanup, error)
+	// CleanupScope is the immutable host-authorization scope for an in-progress
+	// retirement; it does not expose the partially removed session as current.
+	CleanupScope(ctx context.Context, id string) (ContextRef, error)
 
 	// Subscribe calls emit, in order and from one goroutine, with every event
 	// of the conversation after the sequence number after, then with live

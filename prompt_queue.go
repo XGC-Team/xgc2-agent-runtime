@@ -108,7 +108,7 @@ func (b *Broker) applyQueue(s *liveSession, turn string, c QueueCommand) (Prompt
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.info.Archived {
+	if s.stopping || s.info.Archived {
 		return PromptQueue{}, 0, ErrUnavailable
 	}
 	q := cloneQueue(s.queue)

@@ -64,9 +64,9 @@ consumer never initializes a database or imports old settings/journals.
 
 Broker startup reads saved conversations without writing recovery events. It
 projects sessions without a live worker as disconnected and pending queues as
-paused. Existing history and unknown prior outcomes remain unchanged; explicit
-resume and queue commands must persist before dispatch. A full saved conversation
-can still be opened for reading without blocking the other conversations.
+paused. Unknown prior outcomes remain unknown; explicit resume and queue commands must
+persist before dispatch. Retirement of eligible development history is bounded
+and event-driven.
 
 `Create` has `ProfileID`, `Context ContextRef{Kind, ID}`,
 `Workspace WorkspaceRef{ID, Revision}`, and `AgentAccessConfirmed`.
@@ -110,9 +110,10 @@ an HTTP(S) URL. Optional `headers` and `fetch` carry host credentials and suppor
 transport tests; `deadlines` overrides the 15-second ordinary and 70-second
 inspection/connect budgets. `useAgentStream` uses `@xgc2/xrpc-client.events()`
 with the same host transport options. It resumes from the last applied sequence
-via `Last-Event-ID` or `?after=`; a `reset` discards the prior projection and
-replays from the first event. Event streams have no unary call deadline or
-periodic recycle. Invalid events stop the stream with an English diagnosis.
+via `Last-Event-ID`. The first connection and a `reset` obtain the bounded
+`/current` seed and start at its exact cursor. Older records are fetched only
+through an explicit history page request. Event streams have no unary call
+deadline or periodic recycle. Invalid events stop the stream with a diagnosis.
 
 The single protocol schema is `xgc.agent-runtime/v1`. Deltas append, snapshots
 replace, patches preserve text, and item identity includes its turn. Submitted
@@ -258,13 +259,50 @@ for the required durable event. No broker or session lock is held across
 storage calls. A failed commit stops that conversation's worker and reports
 `unavailable`. `Broker.Close` flushes pending events with a 15-second bound.
 
-Startup reads saved metadata and queue references. It marks interrupted sessions
-as disconnected and pauses retained queued prompts; resume is explicit. A lost
+Startup reads saved metadata and only the queue snapshots that still have
+pending prompts. Empty queues restore their revision from session metadata
+without reading history. Interrupted sessions are disconnected and retained
+queued prompts are paused; resume is explicit. A lost
 write reply is checked through its request receipt and never automatically
 resubmitted. Missing storage or identity mismatches fail startup.
 
 Limits are 128 active workers, 2048 retained conversations, 100000 events and
-32 MiB of event data per conversation. The manifest also limits aggregate records,
-bytes and receipts. Reaching quota retains user history and reports failure;
-saved transcripts are not automatically deleted. Storage backup/restore covers
-new-model records. There is no old JSON/JSONL/schema loader or importer.
+32 MiB of event JSON per conversation, and 384 MiB of retained event JSON per
+Broker, including pending writes. Storage separately enforces its collection,
+byte and receipt limits. Admission reports `resource_exhausted` at a limit.
+An idle development conversation becomes eligible for age-based retirement
+after 30 days without a journal event; count/byte pressure can make it eligible
+earlier. This is not a 30-day deletion deadline: there is no expiry timer, and
+an otherwise idle store can retain eligible history indefinitely. Startup,
+subsequent lifecycle events, quota crossings, reader release or explicit cleanup
+can advance retirement. Each automatic or explicit call performs at most 16
+bounded steps (at most 256 events); unfinished work requires a later trigger or
+explicit continuation. A failure also requires a later trigger or explicit retry.
+Active turns, pending input, queued prompts and selected readers are protected.
+`CleanupHistory` and `POST /sessions/{id}/cleanup-history` perform bounded work
+and return whether retirement is complete. Only one cleanup is admitted per
+Broker; a concurrent explicit request is refused immediately with
+`resource_exhausted`, rather than queued. Cancelled requests release admission,
+and continuation joins any in-flight driver close. Broker shutdown cancels and
+joins admitted cleanup. Repeat an explicit cleanup to finish large histories.
+Session metadata records interrupted cleanup progress so a reopen can resume
+without exposing a partial journal.
+
+`GET /sessions/{id}/current` supplies the latest in-memory turn, pending inputs,
+queue, session facts and an exact cursor without reading a journal. A reopened
+Broker exposes earlier turns through explicit history instead of fabricating a
+current turn. A current projection that exceeds its 256-item / 2 MiB bound
+returns `resource_exhausted`; the journal stays available.
+
+`GET /sessions/{id}/history` reads a bounded newest suffix. Supply `before` from
+`nextBefore` for an earlier page. Events in each page remain in sequence order;
+`lastSeq` is the observed stream boundary. A page contains at most 32 events and
+may be shorter at a storage or pending-journal boundary. Subscribers are capped
+at eight per conversation and 32 per Broker and replay bounded chunks. A stream
+with no cursor still replays from sequence zero. Storage backup/restore covers
+current-format records. There is no old JSON/JSONL/schema loader or importer.
+
+The provider's native state and scratch are separate from Broker journal quota.
+Their grant inventory runs before launch and after exit; it does not limit a live
+vendor process. Writable mount isolation and physical filesystem quotas belong
+to the deployment.

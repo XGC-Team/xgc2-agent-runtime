@@ -9,6 +9,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -56,11 +57,14 @@ type HandlerOptions struct {
 //	GET  /sessions/{id}/inputs         POST /sessions/{id}/inputs/{requestId}
 //	POST /sessions/{id}/evaluate-inputs
 //	GET  /sessions/{id}/events         (event stream)
+//	GET  /sessions/{id}/history        (bounded newest-first pages, returned in sequence order)
+//	GET  /sessions/{id}/current         (current projection and stream cursor)
+//	POST /sessions/{id}/cleanup-history
 //
 // The event stream (httpx.ServeEvents) has no call deadline. Its cursor is the
 // event sequence number: the client resumes with Last-Event-ID (or ?after=), and
-// a cursor beyond the journal is answered with a reset that replays from the
-// first event. Ending a stream never stops the worker.
+// a cursor beyond the journal is answered with a reset and the client obtains a
+// fresh current projection. Ending a stream never stops the worker.
 func Handler(service Service, options HandlerOptions) http.Handler {
 	if options.MaxCallTime <= 0 {
 		options.MaxCallTime = DefaultCallTimeout
@@ -100,11 +104,14 @@ func Handler(service Service, options HandlerOptions) http.Handler {
 		return http.StatusOK, attention, err
 	})
 	h.route("GET /sessions", func(c *call) (int, any, error) {
-		query := c.r.URL.Query()
+		query, err := boundedQuery(c.r.URL.RawQuery, "after", "contextKind", "contextId", "limit")
+		if err != nil {
+			return 0, nil, err
+		}
 		list := SessionListOptions{After: query.Get("after"), Context: ContextRef{Kind: query.Get("contextKind"), ID: query.Get("contextId")}}
 		if limit := query.Get("limit"); limit != "" {
 			n, err := strconv.Atoi(limit)
-			if err != nil {
+			if err != nil || n < 1 || strconv.Itoa(n) != limit {
 				return 0, nil, invalid("invalid conversation page limit")
 			}
 			list.Limit = n
@@ -135,6 +142,40 @@ func Handler(service Service, options HandlerOptions) http.Handler {
 	h.route("GET /sessions/{id}/inputs", func(c *call) (int, any, error) {
 		inputs, err := service.Inputs(c.ctx, c.r.PathValue("id"))
 		return http.StatusOK, inputs, err
+	})
+	h.route("GET /sessions/{id}/history", func(c *call) (int, any, error) {
+		query, err := boundedQuery(c.r.URL.RawQuery, "before", "limit")
+		if err != nil {
+			return 0, nil, err
+		}
+		options := HistoryOptions{}
+		if value := query.Get("before"); value != "" {
+			n, err := strconv.ParseUint(value, 10, 64)
+			if err != nil || n == 0 || strconv.FormatUint(n, 10) != value {
+				return 0, nil, invalid("invalid history cursor")
+			}
+			options.Before = n
+		}
+		if value := query.Get("limit"); value != "" {
+			n, err := strconv.Atoi(value)
+			if err != nil || n < 1 || strconv.Itoa(n) != value {
+				return 0, nil, invalid("invalid history page limit")
+			}
+			options.Limit = n
+		}
+		page, err := service.History(c.ctx, c.r.PathValue("id"), options)
+		return http.StatusOK, page, err
+	})
+	h.route("GET /sessions/{id}/current", func(c *call) (int, any, error) {
+		if c.r.URL.RawQuery != "" {
+			return 0, nil, invalid("invalid query")
+		}
+		current, err := service.Current(c.ctx, c.r.PathValue("id"))
+		return http.StatusOK, current, err
+	})
+	h.route("POST /sessions/{id}/cleanup-history", func(c *call) (int, any, error) {
+		result, err := service.CleanupHistory(c.ctx, c.r.PathValue("id"))
+		return http.StatusOK, result, err
 	})
 	h.route("POST /sessions/{id}/evaluate-inputs", func(c *call) (int, any, error) {
 		return http.StatusAccepted, requested, service.EvaluateInputs(c.ctx, c.r.PathValue("id"))
@@ -189,6 +230,26 @@ type handler struct {
 	service Service
 	options HandlerOptions
 	mux     *http.ServeMux
+}
+
+func boundedQuery(raw string, names ...string) (url.Values, error) {
+	if len(raw) > 2048 {
+		return nil, invalid("invalid query")
+	}
+	query, err := url.ParseQuery(raw)
+	if err != nil {
+		return nil, invalid("invalid query")
+	}
+	for key, values := range query {
+		allowed := false
+		for _, name := range names {
+			allowed = allowed || key == name
+		}
+		if !allowed || len(values) != 1 || values[0] == "" {
+			return nil, invalid("invalid query")
+		}
+	}
+	return query, nil
 }
 
 // call is one admitted unary request.
@@ -341,7 +402,7 @@ func (h *handler) events(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rid, err)
 		return
 	}
-	_ = httpx.ServeEvents(w, r, eventSource{h.service, id}, h.options.Events)
+	_ = httpx.ServeEvents(w, r, &eventSource{service: h.service, id: id}, h.options.Events)
 }
 
 // eventSource adapts Service.Subscribe to httpx.EventSource: the cursor is the
@@ -350,13 +411,21 @@ func (h *handler) events(w http.ResponseWriter, r *http.Request) {
 type eventSource struct {
 	service Service
 	id      string
+	reset   bool
 }
 
-func (s eventSource) Subscribe(ctx context.Context, after string, emit func([]httpx.Event) error) error {
+func (s *eventSource) Subscribe(ctx context.Context, after string, emit func([]httpx.Event) error) error {
+	if s.reset && after == "" {
+		// ServeEvents sends its reset before asking for a fresh subscription.
+		// The client must obtain Current and reconnect at that cursor; replaying
+		// from zero here would start an implicit full-history read.
+		return nil
+	}
 	var cursor uint64
 	if after != "" {
 		var err error
-		if cursor, err = strconv.ParseUint(after, 10, 64); err != nil {
+		if cursor, err = strconv.ParseUint(after, 10, 64); err != nil || strconv.FormatUint(cursor, 10) != after {
+			s.reset = true
 			return httpx.ErrCursorGone
 		}
 	}
@@ -368,6 +437,7 @@ func (s eventSource) Subscribe(ctx context.Context, after string, emit func([]ht
 		return emit([]httpx.Event{{ID: strconv.FormatUint(e.Seq, 10), Type: "event", Data: data}})
 	})
 	if errors.Is(err, ErrCursor) {
+		s.reset = true
 		return httpx.ErrCursorGone
 	}
 	return err

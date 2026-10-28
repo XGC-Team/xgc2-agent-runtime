@@ -275,17 +275,17 @@ func TestEventStreamResumesFromTheSequenceCursorAndResetsWhenItIsGone(t *testing
 		t.Fatalf("live event %s, want %d", got.ID, last+1)
 	}
 
-	// A cursor beyond the journal is gone: the stream resets and starts over.
-	ahead, err := httpx.SubscribeEvents(ctx, nil, ref, path, "999999")
+	// A cursor beyond the journal resets; the client must obtain Current before
+	// connecting again, so no fresh full-history replay is started here.
+	resetCtx, stopReset := context.WithCancel(ctx)
+	ahead, err := httpx.SubscribeEvents(resetCtx, nil, ref, path, "999999")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := nextEvent(t, ahead); got.Type != httpx.EventReset {
 		t.Fatalf("no reset: %+v", got)
 	}
-	if got := nextEvent(t, ahead); got.ID != itoa(journal[0].Seq) {
-		t.Fatalf("restarted at %s, want %d", got.ID, journal[0].Seq)
-	}
+	stopReset()
 	// A cursor that is not a sequence number is unknown to the source as well.
 	garbled, err := httpx.SubscribeEvents(ctx, nil, ref, path, "not-a-number")
 	if err != nil {
@@ -365,5 +365,20 @@ func TestXRPCEventSourceUsesSingletonBatchesAndStopsOnSinkError(t *testing.T) {
 	})
 	if !errors.Is(err, stop) || calls != 2 || service.after != 7 {
 		t.Fatalf("err=%v calls=%d after=%d", err, calls, service.after)
+	}
+}
+
+func TestXRPCResetDoesNotReadFreshHistory(t *testing.T) {
+	for _, cursor := range []string{"invalid", "01"} {
+		service := &finiteXRPCEventService{events: []Event{{Seq: 1, Kind: "old"}}}
+		source := eventSource{service: service, id: "session"}
+		emitted := 0
+		emit := func([]httpx.Event) error { emitted++; return nil }
+		if err := source.Subscribe(t.Context(), cursor, emit); !errors.Is(err, httpx.ErrCursorGone) {
+			t.Fatalf("invalid cursor: %v", err)
+		}
+		if err := source.Subscribe(t.Context(), "", emit); err != nil || emitted != 0 || service.after != 0 {
+			t.Fatalf("reset read history: after=%d emitted=%d err=%v", service.after, emitted, err)
+		}
 	}
 }

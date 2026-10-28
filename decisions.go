@@ -120,7 +120,7 @@ func (b *Broker) EvaluateInputs(_ context.Context, id string) error {
 	s.mu.Lock()
 	info, cwd := s.info, s.cwd
 	requests := []Request{}
-	for _, pending := range s.inputs {
+	for _, pending := range s.activeInputs {
 		if pending.active && pending.answer == nil {
 			requests = append(requests, pending.request)
 		}

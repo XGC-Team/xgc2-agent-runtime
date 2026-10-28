@@ -27,6 +27,10 @@ const (
 	maxPendingEvents = 512
 	maxPendingBytes  = 2 << 20
 	maxEventBytes    = 3 << 20
+	// All appenders share these admission limits, including the batch currently
+	// being committed (it remains in pending until the receipt is confirmed).
+	maxBufferedEvents = 4096
+	maxBufferedBytes  = maxPendingBytes + maxEventBytes
 )
 
 // pendingEvent is an event numbered but not yet committed.
@@ -75,8 +79,30 @@ func (s *liveSession) appendLocked(e Event) error {
 	if err != nil {
 		return err
 	}
-	if len(data) > maxEventBytes || s.bytes+int64(len(data)) > MaxSessionBytes || s.info.LastSeq >= MaxEvents {
-		return s.stopLocked(exhausted("event storage capacity reached; retain and review this session"))
+	useReservation := s.reservedControl > 0 && e.Kind == "session.state" && e.Status == "running" && e.TurnID == s.current
+	reservedBytes := s.reservedControl
+	reservedEvents := 0
+	if useReservation {
+		reservedBytes = 0
+		if int64(len(data)) > s.reservedControl {
+			return s.stopLocked(exhausted("running-state event exceeds its admission reservation"))
+		}
+	} else if reservedBytes > 0 {
+		reservedEvents = 1
+	}
+	if len(data) > maxEventBytes || s.bytes+int64(len(data))+reservedBytes > MaxSessionBytes || s.info.LastSeq+uint64(1+reservedEvents) > MaxEvents {
+		return s.stopLocked(exhausted("event storage capacity reached"))
+	}
+	if len(s.pending)+1+reservedEvents > maxBufferedEvents || s.pendingBytes+int64(len(data))+reservedBytes > maxBufferedBytes {
+		return s.stopLocked(exhausted("event journal admission capacity reached"))
+	}
+	if useReservation {
+		if s.broker != nil {
+			s.broker.historyBytes.Add(-(s.reservedControl - int64(len(data))))
+		}
+		s.reservedControl = 0
+	} else if s.broker != nil && !s.broker.reserveHistory(int64(len(data))) {
+		return s.stopLocked(exhausted("retained history byte capacity reached"))
 	}
 	queued := false
 	if e.Kind == "item.snapshot" && e.Role == "user" && e.Status == "submitted" && s.queueSeq > 0 {
@@ -85,6 +111,7 @@ func (s *liveSession) appendLocked(e Event) error {
 		}
 	}
 	s.bytes += int64(len(data))
+	s.updatedAt = e.CreatedAt
 	s.info.LastSeq = e.Seq
 	if e.Kind == "session.state" {
 		s.info.State = e.Status
@@ -93,8 +120,13 @@ func (s *liveSession) appendLocked(e Event) error {
 		s.info.AgentSessionID = e.AgentSessionID
 	}
 	s.applyMetadataLocked(e)
+	s.applyCurrentLocked(e, len(data))
+	if e.Kind == "session.state" || e.Kind == "session.metadata" || e.Kind == "input.request" || e.Kind == "input.resolved" {
+		s.indexAttentionLocked()
+	}
 	if e.Kind == "prompt.queue" {
 		s.queueSeq = e.Seq
+		s.queueBytes = len(data)
 		s.submittedQueueTurns = nil
 	}
 	if queued {
@@ -110,6 +142,9 @@ func (s *liveSession) appendLocked(e Event) error {
 
 // broadcastLocked wakes the subscribers: there is a new event or a failure.
 func (s *liveSession) broadcastLocked() {
+	if s.subscribers == 0 {
+		return
+	}
 	close(s.changed)
 	s.changed = make(chan struct{})
 }
@@ -118,9 +153,10 @@ func (s *liveSession) broadcastLocked() {
 // worker, which could no longer be recorded. Subscribers read what is pending
 // and then see the failure.
 func (s *liveSession) stopLocked(cause error) error {
-	s.storageErr = errors.Join(errors.New("event persistence failed; session stopped"), cause)
+	s.storageErr = errors.Join(errors.New("event journal stopped"), cause)
 	s.info.State = "disconnected"
-	for _, p := range s.inputs {
+	s.indexAttentionLocked()
+	for _, p := range s.activeInputs {
 		if p.active {
 			p.cancel()
 		}
@@ -128,11 +164,25 @@ func (s *liveSession) stopLocked(cause error) error {
 	if s.cancel != nil {
 		s.cancel()
 	}
-	if driver := s.driver; driver != nil {
-		go func() { _ = driver.Close() }()
-	}
+	s.startDriverCloseLocked(s.driver)
 	s.broadcastLocked()
 	return s.storageErr
+}
+
+// Caller holds the session lock. Exactly one close may be detached while its
+// process joins; retirement and Broker.Close wait for this same completion.
+func (s *liveSession) startDriverCloseLocked(driver Driver) {
+	if driver != nil && s.stopClose == nil {
+		done := make(chan struct{})
+		s.stopClose = done
+		go func() {
+			err := driver.Close()
+			s.mu.Lock()
+			s.stopCloseErr = err
+			s.mu.Unlock()
+			close(done)
+		}()
+	}
 }
 
 // scheduleLocked makes sure a flush is under way; urgent skips the delay.
@@ -229,9 +279,11 @@ func (s *liveSession) flush() {
 		s.version = newVersion
 		s.durable = batch[len(batch)-1].event.Seq
 		s.pendingBytes -= size
+		clear(s.pending[:len(batch)])
 		if s.pending = s.pending[len(batch):]; len(s.pending) == 0 {
 			s.pending = nil
 		}
+		batch = nil
 		close(s.flushed)
 		s.flushed = make(chan struct{})
 		s.mu.Unlock()
@@ -288,12 +340,19 @@ func (s *liveSession) flushAll(ctx context.Context) error {
 
 // tailLocked returns the events after the cursor, up to end, that are not yet in
 // storage, and the highest sequence number that is.
-func (s *liveSession) tailLocked(after, end uint64) ([]Event, uint64) {
+func (s *liveSession) tailLocked(after, end uint64) ([]Event, []int) {
 	var events []Event
+	var sizes []int
+	var bytes int
 	for _, p := range s.pending {
 		if p.event.Seq > after && p.event.Seq <= end {
+			if len(events) > 0 && bytes+len(p.data) > replayBytes {
+				break
+			}
 			events = append(events, p.event)
+			sizes = append(sizes, len(p.data))
+			bytes += len(p.data)
 		}
 	}
-	return events, s.durable
+	return events, sizes
 }

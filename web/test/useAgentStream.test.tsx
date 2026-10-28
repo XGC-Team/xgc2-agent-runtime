@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { useAgentStream, AGENT_STREAM_STATUS } from '../src/useAgentStream.js'
 import { AGENT_RUNTIME_SCHEMA, type AgentSession } from '../src/state.js'
 import * as streamState from '../src/state.js'
+import * as fingerprints from '../src/fingerprint.js'
 
 const session = { schemaVersion: AGENT_RUNTIME_SCHEMA, id: 's_test', provider: 'codex', state: 'ready', createdAt: '2026-09-06T00:00:00Z', lastSeq: 0, title: 'Review', archived: false, metadataRevision: 1,
   scope: { profileId: 'codex', context: { kind: 'fixture', id: 'e1' }, workspace: { id: 'debug', revision: 'v1' }, accessConfirmed: true } } as AgentSession
@@ -11,8 +12,9 @@ const frame = (event: object | null, type = 'event') => `${event && 'seq' in eve
 
 /** One scripted connection: the frames it sends, then whether it stays open. */
 type Connection = { status?: number; frames?: string[]; hold?: boolean }
-function server(plan: Connection[]) {
+function server(plan: Connection[], seeds: object[] = [{session,items:[],inputs:[]}]) {
   const requests: Request[] = []
+  const currentRequests: Request[] = []
   const stream = (c: Connection, signal: AbortSignal | null | undefined) => {
     const encoder = new TextEncoder()
     return new ReadableStream<Uint8Array>({
@@ -25,6 +27,11 @@ function server(plan: Connection[]) {
   }
   const fetch = (async (input: URL | RequestInfo, init?: RequestInit) => {
     const request = new Request(input, init)
+    if (request.url.endsWith('/current')) {
+      const seed = seeds[Math.min(currentRequests.length,seeds.length - 1)]!
+      currentRequests.push(request)
+      return new Response(JSON.stringify(seed), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }
     requests.push(request)
     const connection = plan[Math.min(requests.length - 1, plan.length - 1)]!
     if (connection.status && connection.status !== 200) {
@@ -32,7 +39,7 @@ function server(plan: Connection[]) {
     }
     return new Response(stream(connection, init?.signal), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
   }) as typeof globalThis.fetch
-  return { fetch, requests }
+  return { fetch, requests, currentRequests }
 }
 
 const options = (fetch: typeof globalThis.fetch) => ({ basePath: 'https://core.test/api/agent-runtime', fetch, headers: { Authorization: 'Bearer host' } })
@@ -64,29 +71,138 @@ describe('useAgentStream over the XRPC event stream', () => {
     expect(first.url).toBe('https://core.test/api/agent-runtime/sessions/s_test/events')
     expect(first.headers.get('Accept')).toBe('text/event-stream')
     expect(first.headers.get('Authorization')).toBe('Bearer host')
-    expect(first.headers.get('Last-Event-ID')).toBeNull()
+    expect(first.headers.get('Last-Event-ID')).toBe('0')
     unmount()
   })
 
   it('resumes from the last applied event after the connection drops and never needs the prompt again', async () => {
+    const hash = vi.spyOn(fingerprints,'fingerprintBytes')
     const { fetch, requests } = server([{ frames: [frame(delta(1, 'a')), frame(delta(2, 'b'))] }, { frames: [frame(delta(3, 'c'))], hold: true }])
     const { result, unmount } = renderHook(() => useAgentStream(session, 0, options(fetch)))
     await waitFor(() => expect(result.current.state.cursor).toBe(3), { timeout: 4000 })
     expect(result.current.state.items[0]?.text).toBe('abc')
     expect(requests[1]!.headers.get('Last-Event-ID')).toBe('2')
     expect(requests.every(request => request.method === 'GET')).toBe(true)
+    expect(hash).toHaveBeenCalledTimes(3)
     unmount()
   })
 
-  it('starts over when the service no longer knows the cursor', async () => {
-    const { fetch } = server([
+  it('replaces stale state with a bounded current seed on reset', async () => {
+    const fresh = {...delta(1,'fresh'),kind:'item.snapshot'}
+    const { fetch, currentRequests, requests } = server([
       { frames: [frame(delta(1, 'old'), 'event'), frame(delta(2, ' state'))] },
-      { frames: ['event: reset\ndata: {}\n\n', frame(delta(1, 'fresh'))], hold: true },
-    ])
+      { frames: ['event: reset\ndata: {}\n\n', frame(delta(1, 'stale replay'))], hold: true },
+      { hold: true },
+    ], [{session,items:[],inputs:[]}, {session:{...session,lastSeq:1},items:[fresh],inputs:[],historyBefore:1}])
     const { result, unmount } = renderHook(() => useAgentStream(session, 0, options(fetch)))
     await waitFor(() => expect(result.current.state.items[0]?.text).toBe('fresh'), { timeout: 4000 })
     expect(result.current.state.cursor).toBe(1)
     expect(result.current.state.items).toHaveLength(1)
+    expect(currentRequests).toHaveLength(2)
+    expect(requests[2]!.headers.get('Last-Event-ID')).toBe('1')
+    unmount()
+  })
+
+  it('starts at the current cursor with complete items and pending controls without reading history', async () => {
+    const hash = vi.spyOn(fingerprints,'fingerprintBytes')
+    const currentSession = {...session,state:'awaiting-input',lastSeq:100,runtimeId:'r_live'}
+    const item = {...delta(95,'complete answer'),kind:'item.snapshot'}
+    const tool = {...delta(96,'tool output'),kind:'item.snapshot',itemId:'tool_1',role:'tool',details:{type:'commandExecution',command:'inspect'}}
+    const request = {id:'q_1',kind:'permission',title:'Approve',options:[],questions:[]}
+    const {fetch,requests,currentRequests} = server([{frames:[frame(delta(101,' more'))],hold:true}], [{session:currentSession,activeTurnId:'t_a',items:[item,tool],inputs:[{request,submitted:true,decision:{outcome:'allow'}}],historyBefore:90}])
+    const {result,unmount} = renderHook(() => useAgentStream(currentSession as AgentSession,0,options(fetch)))
+    await waitFor(() => expect(result.current.state.cursor).toBe(101))
+    expect(result.current.state.items[0]?.text).toBe('complete answer more')
+    expect(result.current.state.items[1]?.text).toBe('tool output')
+    expect(result.current.state.pending.q_1?.submitted).toBe(true)
+    expect(result.current.state.activeTurnId).toBe('t_a')
+    expect(result.current.state.historyBefore).toBe(90)
+    expect(currentRequests).toHaveLength(1)
+    expect(requests).toHaveLength(1)
+    expect(requests[0]!.headers.get('Last-Event-ID')).toBe('100')
+    expect([...requests,...currentRequests].every(request => !request.url.includes('/history'))).toBe(true)
+    expect(hash).toHaveBeenCalledOnce() // The seed's items and requests are not replay events.
+    unmount()
+  })
+
+  it('drops pending hash work on reset, rehydrates without hashing, then resumes at the new cursor', async () => {
+    const frames = controlledFrames()
+    const hash = vi.spyOn(fingerprints,'fingerprintBytes')
+    const serialize = vi.spyOn(JSON,'stringify')
+    const fresh = {...delta(9,'fresh'),kind:'item.snapshot'}
+    const {fetch,currentRequests,requests} = server([
+      {frames:[frame(delta(1,'discarded')), 'event: reset\ndata: {}\n\n'],hold:true},
+      {frames:[frame(delta(11,' new'))],hold:true},
+    ], [{session,items:[],inputs:[]},{session:{...session,lastSeq:10},items:[fresh],inputs:[]}])
+    serialize.mockClear()
+    const eventSerializations = () => serialize.mock.calls.filter(([value]) => value && typeof value === 'object' && 'schemaVersion' in value && 'kind' in value)
+    const {result,unmount} = renderHook(() => useAgentStream(session,0,options(fetch)))
+    await waitFor(() => expect(currentRequests).toHaveLength(2))
+    await waitFor(() => expect(frames.pending.size).toBe(1))
+    expect(requests[1]!.headers.get('Last-Event-ID')).toBe('10')
+    expect(result.current.state.items[0]?.text).toBe('fresh')
+    expect(result.current.state.cursor).toBe(10)
+    expect(frames.cancel).toHaveBeenCalledOnce()
+    expect(hash).not.toHaveBeenCalled()
+    expect(eventSerializations()).toHaveLength(0)
+    act(frames.flush)
+    expect(result.current.state.cursor).toBe(11)
+    expect(result.current.state.items[0]?.text).toBe('fresh new')
+    expect(hash).toHaveBeenCalledOnce()
+    expect(eventSerializations()).toHaveLength(1)
+    expect(hash.mock.calls[0]![0].byteLength).toBe(new TextEncoder().encode(JSON.stringify(streamState.decodeEvent(delta(11,' new'),session.id,session.provider))).byteLength)
+    unmount()
+    expect(requests[1]!.signal.aborted).toBe(true)
+  })
+
+  it('keeps a completed accepted result in the seed and rejects a stale pre-seed event', async () => {
+    const completed = {...session,lastSeq:10}
+    const item = {...delta(8,'accepted result'),kind:'item.snapshot'}
+    const end = {schemaVersion:AGENT_RUNTIME_SCHEMA,sessionId:'s_test',provider:'codex',seq:9,kind:'turn.end',turnId:'t_a',status:'completed'}
+    const {fetch} = server([{frames:[frame(delta(10,'wrong'))],hold:true}], [{session:completed,items:[item],inputs:[],result:end}])
+    const {result,unmount} = renderHook(() => useAgentStream(completed,0,options(fetch)))
+    await waitFor(() => expect(result.current.connection).toBe(AGENT_STREAM_STATUS.invalid))
+    expect(result.current.state.items[0]?.text).toBe('accepted result')
+    expect(result.current.state.items[0]?.turnStatus).toBe('completed')
+    expect(result.current.error).toMatch(/cursor/)
+    unmount()
+  })
+
+  it('deduplicates identical delivered events after the seed', async () => {
+    const currentSession = {...session,lastSeq:10}
+    const {fetch} = server([{frames:[frame(delta(11,'a')),frame(delta(11,'a')),frame(delta(12,'b'))],hold:true}], [{session:currentSession,items:[],inputs:[]}])
+    const {result,unmount} = renderHook(() => useAgentStream(currentSession,0,options(fetch)))
+    await waitFor(() => expect(result.current.state.cursor).toBe(12))
+    expect(result.current.state.items[0]?.text).toBe('ab')
+    unmount()
+  })
+
+  it('accepts a bounded event above the transport default and marks display truncation', async () => {
+    const {fetch} = server([{frames:[frame(delta(1,'x'.repeat(1_200_000)))],hold:true}])
+    const {result,unmount} = renderHook(() => useAgentStream(session,0,options(fetch)))
+    await waitFor(() => expect(result.current.state.cursor).toBe(1))
+    expect(result.current.state.items[0]?.truncated).toBe(true)
+    expect(result.current.state.items[0]?.text).toHaveLength(262144)
+    unmount()
+  })
+
+  it('rejects a foreign current seed before opening a stream', async () => {
+    const foreign = {...session,scope:{...session.scope,context:{kind:'fixture',id:'foreign'}}}
+    const {fetch,requests} = server([{hold:true}], [{session:foreign,items:[],inputs:[]}])
+    const {result,unmount} = renderHook(() => useAgentStream(session,0,options(fetch)))
+    await waitFor(() => expect(result.current.connection).toBe(AGENT_STREAM_STATUS.refused))
+    expect(result.current.error).toMatch(/identity/)
+    expect(requests).toHaveLength(0)
+    unmount()
+  })
+
+  it('offers the newest explicit history page when a current seed exceeds capacity', async () => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({error:{code:'resource_exhausted',message:'current view too large'}}),{status:429,headers:{'Content-Type':'application/json'}})) as typeof globalThis.fetch
+    const {result,unmount} = renderHook(() => useAgentStream(session,0,options(fetch)))
+    await waitFor(() => expect(result.current.connection).toBe(AGENT_STREAM_STATUS.refused))
+    expect(result.current.state.historyBefore).toBe(0)
+    expect(result.current.error).toContain('resource_exhausted')
+    expect(fetch).toHaveBeenCalledTimes(1)
     unmount()
   })
 
@@ -132,6 +248,7 @@ describe('useAgentStream over the XRPC event stream', () => {
   it('cancels a pending presentation and rejects its late callback after the stream owner unmounts', async () => {
     const frames = controlledFrames()
     const apply = vi.spyOn(streamState, 'applyEvent')
+    const hash = vi.spyOn(fingerprints,'fingerprintBytes')
     const { fetch, requests } = server([{ frames: [frame(delta(1, 'pending'))], hold: true }])
     const { result, unmount } = renderHook(() => useAgentStream(session, 0, options(fetch)))
     await waitFor(() => expect(frames.pending.size).toBe(1))
@@ -143,5 +260,41 @@ describe('useAgentStream over the XRPC event stream', () => {
     expect(frames.pending.size).toBe(0)
     act(() => late(0))
     expect(apply).not.toHaveBeenCalled()
+    expect(hash).not.toHaveBeenCalled()
+  })
+
+  it('releases hidden work and does not hash the authoritative seed on reveal', async () => {
+    const frames = controlledFrames()
+    const hash = vi.spyOn(fingerprints,'fingerprintBytes')
+    const serialize = vi.spyOn(JSON,'stringify')
+    const fresh = {...delta(1,'accepted while hidden'),kind:'item.snapshot'}
+    const {fetch,requests,currentRequests} = server([
+      {frames:[frame(delta(1,'old pending'))],hold:true},
+      {frames:[frame(delta(2,' then live'))],hold:true},
+    ], [{session,items:[],inputs:[]},{session:{...session,lastSeq:1},items:[fresh],inputs:[]}])
+    serialize.mockClear()
+    const eventSerializations = () => serialize.mock.calls.filter(([value]) => value && typeof value === 'object' && 'schemaVersion' in value && 'kind' in value)
+    const {result,rerender,unmount} = renderHook(({visible}) => useAgentStream(visible ? session : undefined,0,options(fetch)),{initialProps:{visible:true}})
+    await waitFor(() => expect(frames.pending.size).toBe(1))
+    const late = [...frames.pending.values()][0]!
+    rerender({visible:false})
+    expect(requests[0]!.signal.aborted).toBe(true)
+    expect(frames.pending.size).toBe(0)
+    act(() => late(0))
+    expect(hash).not.toHaveBeenCalled()
+    expect(eventSerializations()).toHaveLength(0)
+    rerender({visible:true})
+    await waitFor(() => expect(currentRequests).toHaveLength(2))
+    await waitFor(() => expect(frames.pending.size).toBe(1))
+    expect(result.current.state.items[0]?.text).toBe('accepted while hidden')
+    expect(requests[1]!.headers.get('Last-Event-ID')).toBe('1')
+    expect(hash).not.toHaveBeenCalled()
+    expect(eventSerializations()).toHaveLength(0)
+    act(frames.flush)
+    expect(result.current.state.items[0]?.text).toBe('accepted while hidden then live')
+    expect(result.current.state.cursor).toBe(2)
+    expect(hash).toHaveBeenCalledOnce()
+    expect(eventSerializations()).toHaveLength(1)
+    unmount()
   })
 })

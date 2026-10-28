@@ -9,15 +9,36 @@ const session = (value) => ({ schemaVersion: AGENT_RUNTIME_SCHEMA, id: 's_test',
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 const failure = (code, message, status, details) => json({ error: { code, message, ...(details ? { details } : {}) } }, status)
 
-test('complete inventories follow server cursors while page callers retain explicit pagination', async () => {
+test('conversation catalogs read one page per explicit request', async () => {
   const calls = []
   const client = createAgentClient({ basePath: root, fetch: async url => {
     calls.push(String(url))
     return json(String(url).includes('after=') ? { sessions: [{ ...session(scope()), id: 's_second' }] } : { sessions: [session(scope())], nextCursor: 'next' })
   } })
-  assert.deepEqual((await client.getNativeSessions()).map(value => value.id), ['s_test', 's_second'])
-  assert.deepEqual(calls, [`${root}/sessions`, `${root}/sessions?after=next`])
-  assert.equal((await client.getNativeSessionPage(undefined, { limit: 1 })).nextCursor, 'next')
+  const first = await client.getNativeSessionPage(undefined, { limit: 1 })
+  assert.equal(first.nextCursor, 'next')
+  assert.deepEqual(first.sessions.map(value => value.id), ['s_test'])
+  assert.deepEqual(calls, [`${root}/sessions?limit=1`])
+  const second = await client.getNativeSessionPage(undefined, { after: first.nextCursor })
+  assert.deepEqual(second.sessions.map(value => value.id), ['s_second'])
+  assert.equal(calls.length, 2)
+})
+
+test('bounded current and history responses accept valid payloads above the transport default', async () => {
+  const value = {...session(scope()),lastSeq:2}
+  const image = 'A'.repeat(1_200_000)
+  const base = {schemaVersion:AGENT_RUNTIME_SCHEMA,sessionId:'s_test',provider:'codex',turnId:'t_one',itemId:'tool',role:'tool'}
+  const calls = []
+  const client = createAgentClient({basePath:root,fetch:async url => {
+    calls.push(String(url))
+    if (String(url).endsWith('/current')) return json({session:value,items:[{...base,seq:1,kind:'item.snapshot',details:{type:'mcpToolCall',server:'fixture',tool:'inspect',result:{content:[{type:'image',mimeType:'image/png',data:image,width:1,height:1}]}}}],inputs:[]})
+    return json({events:[{...base,seq:1,kind:'item.snapshot',text:'x'.repeat(600_000)},{...base,seq:2,kind:'item.delta',text:'y'.repeat(600_000)}],lastSeq:2})
+  }})
+  const current = await client.getNativeCurrent(value)
+  assert.equal(current.items[0].details.result.content[0].data.length,image.length)
+  const history = await client.getNativeHistory(value,{before:3,limit:2})
+  assert.deepEqual(history.events.map(event => event.text.length),[600_000,600_000])
+  assert.equal(calls.length,2)
 })
 
 test('pending inputs carry no policy scope and re-evaluation sends no body or answer', async () => {

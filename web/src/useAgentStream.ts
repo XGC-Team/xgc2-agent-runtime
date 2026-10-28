@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { events, XrpcError } from '@xgc2/xrpc-client'
 import { applyEvent, emptyStream, type AgentSession } from './state.js'
-import { nativeAgentBasePath } from './client.js'
+import { createAgentClient, nativeAgentBasePath } from './client.js'
 
 /**
  * `headers` and `fetch` reach the event stream as they do the client's calls;
@@ -24,9 +24,9 @@ export const AGENT_STREAM_STATUS = {
 /**
  * Follows a conversation's event stream (the XRPC http.v1 event stream of the
  * service) and reduces it into display state. The stream resumes from the last
- * event it applied; when the service no longer knows that cursor it starts over
- * from the first event. A reconnect only replays the journal and never resends
- * a prompt.
+ * event it applied. The first connection and a cursor reset read the bounded
+ * current projection before following its exact cursor. Reconnect never resends
+ * a prompt or automatically reads older history.
  */
 export function useAgentStream(session: AgentSession | undefined, reload: number, { basePath, headers, fetch }: AgentStreamOptions) {
   const root = nativeAgentBasePath(basePath)
@@ -48,11 +48,11 @@ export function useAgentStream(session: AgentSession | undefined, reload: number
     setError(''); setConnection(AGENT_STREAM_STATUS.connecting)
     const abort = new AbortController()
     let active = true, frame: number | undefined
-    let queue: unknown[] = []
-    let invalid = false
+    let queue: unknown[] = [], queueBytes = 0
+    let invalid = false, streamAbort: AbortController | undefined
     const fail = (cause: unknown, status: string) => {
       if (!active || invalid) return
-      invalid = true; abort.abort(); queue = []; setConnection(status)
+      invalid = true; abort.abort(); streamAbort?.abort(); queue = []; queueBytes = 0; setConnection(status)
       setError(cause instanceof Error ? cause.message : String(cause))
     }
     const flush = () => {
@@ -61,46 +61,80 @@ export function useAgentStream(session: AgentSession | undefined, reload: number
       try {
         let next = current.current
         for (const event of queue) next = applyEvent(next, event)
-        queue = []; current.current = next; setState(next)
+        queue = []; queueBytes = 0; current.current = next; setState(next)
       } catch (cause) { fail(cause, AGENT_STREAM_STATUS.invalid) }
     }
     const { headers: extra, fetch: transportFetch } = transport.current
-    const cursor = current.current.cursor
-    events(`${root}/sessions/${encodeURIComponent(session.id)}/events`, {
-      ...(cursor > 0 ? { after: String(cursor) } : {}),
-      signal: abort.signal,
-      ...(extra ? { headers: extra } : {}),
-      ...(transportFetch ? { fetch: transportFetch } : {}),
-      onOpen: () => { if (active && !invalid) setConnection(AGENT_STREAM_STATUS.connected) },
-      onError: () => { if (active && !invalid) setConnection(AGENT_STREAM_STATUS.interrupted) },
-      onClosing: () => { if (active && !invalid) setConnection(AGENT_STREAM_STATUS.draining) },
-      // The service does not know the cursor (its journal restarted or was
-      // restored): what was shown may not be what is stored. Start over.
-      onReset: () => {
+    const client = createAgentClient({basePath:root,...(extra ? {headers:extra} : {}),...(transportFetch ? {fetch:transportFetch} : {})})
+    const follow = async () => {
+      let resets = 0
+      while (active && !invalid) {
+        let seed
+        try {
+          seed = await client.getNativeCurrent(session,abort.signal)
+        } catch (cause) {
+          if (active && cause instanceof XrpcError && cause.code === 'resource_exhausted') {
+            // Zero is a local request for the newest explicit history page;
+            // it does not guess a cursor from the possibly stale catalog row.
+            current.current = {...emptyStream(session.id,session.provider),worker:session.state,historyBefore:0}
+            setState(current.current)
+          }
+          throw cause
+        }
         if (!active || invalid) return
-        if (frame !== undefined) cancelAnimationFrame(frame)
-        frame = undefined; queue = []
-        current.current = emptyStream(session.id, session.provider)
-        setState(current.current)
-      },
-      onEvent: ({ event, data }) => {
-        if (!active || invalid || event !== 'event') return
-        let parsed: unknown
-        try { parsed = JSON.parse(data) } catch (cause) { fail(cause, AGENT_STREAM_STATUS.invalid); return }
-        queue.push(parsed)
-        if (queue.length >= 256) { if (frame !== undefined) cancelAnimationFrame(frame); flush() }
-        else if (frame === undefined) frame = requestAnimationFrame(flush)
-      },
-    }).catch((cause: unknown) => {
-      // Only a failure retrying cannot fix ends the stream: the service refused it.
+        current.current = seed; setState(seed)
+        streamAbort = new AbortController()
+        const child = streamAbort
+        const stopChild = () => child.abort()
+        abort.signal.addEventListener('abort',stopChild,{once:true})
+        let reset = false
+        try {
+          await events(`${root}/sessions/${encodeURIComponent(session.id)}/events`, {
+            after: String(seed.cursor),
+            signal: child.signal,
+            maxEventChars: 3 * 1024 * 1024,
+            ...(extra ? { headers: extra } : {}),
+            ...(transportFetch ? { fetch: transportFetch } : {}),
+            onOpen: () => { if (active && !invalid) setConnection(AGENT_STREAM_STATUS.connected) },
+            onError: () => { if (active && !invalid) setConnection(AGENT_STREAM_STATUS.interrupted) },
+            onClosing: () => { if (active && !invalid) setConnection(AGENT_STREAM_STATUS.draining) },
+            onReset: () => {
+              if (!active || invalid) return
+              reset = true; child.abort()
+              if (frame !== undefined) cancelAnimationFrame(frame)
+              frame = undefined; queue = []; queueBytes = 0
+              setConnection(AGENT_STREAM_STATUS.connecting)
+            },
+            onEvent: ({ event, data, id }) => {
+              if (!active || invalid || child.signal.aborted || event !== 'event') return
+              let parsed: unknown
+              try {
+                parsed = JSON.parse(data)
+                const seq = (parsed as {seq?:unknown} | null)?.seq
+                if (!Number.isSafeInteger(seq) || (seq as number) <= seed.cursor || id !== String(seq)) throw new Error('The stream cursor does not match its event.')
+              } catch (cause) { fail(cause, AGENT_STREAM_STATUS.invalid); return }
+              if (queue.length && queueBytes + data.length > 4 * 1024 * 1024) { if (frame !== undefined) cancelAnimationFrame(frame); flush() }
+              if (!active || invalid) return
+              queue.push(parsed); queueBytes += data.length
+              if (queue.length >= 256) { if (frame !== undefined) cancelAnimationFrame(frame); flush() }
+              else if (frame === undefined) frame = requestAnimationFrame(flush)
+            },
+          })
+        } finally {
+          abort.signal.removeEventListener('abort',stopChild)
+        }
+        if (!reset || !active || invalid) return
+        if (++resets > 2) throw new Error('The conversation cursor repeatedly reset; reopen the conversation.')
+      }
+    }
+    void follow().catch((cause: unknown) => {
+      if (abort.signal.aborted || !active) return
       fail(cause instanceof XrpcError ? new Error(`${cause.message} (${cause.code})`) : cause, AGENT_STREAM_STATUS.refused)
     })
     return () => {
-      active = false; abort.abort()
+      active = false; abort.abort(); streamAbort?.abort()
       if (frame !== undefined) cancelAnimationFrame(frame)
-      // Unrendered frames are replayed on the next mount from our committed
-      // cursor. Hiding the UI never sends cancel/close to the native process.
-      queue = []
+      queue = []; queueBytes = 0
     }
   }, [session?.id, session?.provider, reload, root])
   return { state: state.sessionId === session?.id ? state : initial(), connection, error }

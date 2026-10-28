@@ -1,6 +1,6 @@
 import { call, XrpcError, type CallOptions } from '@xgc2/xrpc-client'
 import { decodeNativeSettings, type AgentProviderSettingsUpdate } from './providerSettings.js'
-import { decodePromptQueue, decodeProfiles, decodeSession, decodeSessions, decodeNativeRequest, type AgentAnswer, type AgentTurnOptions, type Scope } from './state.js'
+import { decodeCurrentSeed, decodeEvent, decodePromptQueue, decodeProfiles, decodeSession, decodeSessions, decodeNativeRequest, type AgentAnswer, type AgentSession, type AgentTurnOptions, type Scope } from './state.js'
 
 export { XrpcError }
 
@@ -13,6 +13,7 @@ export const AGENT_CALL_DEADLINES = {
 }
 
 export type AgentSessionListOptions = { after?: string; limit?: number }
+export type AgentHistoryOptions = { before?: number; limit?: number }
 export type AgentSessionMetadataUpdate = { expectedRevision: number; title?: string; archived?: boolean }
 export type AgentQueueCommand = { operation: 'enqueue' | 'edit' | 'remove' | 'reorder' | 'pause' | 'resume'; expectedRevision?: number; id?: string; text?: string; options?: AgentTurnOptions; order?: string[] }
 
@@ -74,10 +75,11 @@ export function createAgentClient(options: AgentClientOptions) {
   const root = nativeAgentBasePath(options.basePath)
   const deadlines = { ...AGENT_CALL_DEADLINES, ...options.deadlines }
   /** One XRPC call: the answer is decoded, a failure is thrown as the XrpcError the service sent. */
-  async function request<T>(method: 'GET' | 'POST', path: string, decode: (value: unknown) => T, init: { body?: unknown; deadlineMs?: number; requestId?: string; signal?: AbortSignal } = {}): Promise<T> {
+  async function request<T>(method: 'GET' | 'POST', path: string, decode: (value: unknown) => T, init: { body?: unknown; deadlineMs?: number; requestId?: string; signal?: AbortSignal; maxResponseBytes?: number } = {}): Promise<T> {
     const callOptions: CallOptions = { deadlineMs: init.deadlineMs ?? deadlines.short }
     if (init.requestId !== undefined) callOptions.requestId = init.requestId
     if (init.signal) callOptions.signal = init.signal
+    if (init.maxResponseBytes !== undefined) callOptions.maxResponseBytes = init.maxResponseBytes
     if (options.headers) callOptions.headers = options.headers
     if (options.fetch) callOptions.fetch = options.fetch
     const result = await call(`${root}${path}`, method, init.body, callOptions)
@@ -98,22 +100,22 @@ export function createAgentClient(options: AgentClientOptions) {
     refreshNativeSettings: (id: string) => request('POST', '/settings/refresh', decodeNativeSettings, { body: { id }, deadlineMs: deadlines.long }),
     getNativeProfiles: (signal?: AbortSignal) => request('GET', '/providers', decodeProfiles, { signal }),
     getNativeSessionPage,
-    // Existing embedded clients request a complete inventory. Follow the same
-    // paginated authority instead of silently returning only the first page.
-    getNativeSessions: async (signal?: AbortSignal) => {
-      const sessions = [] as ReturnType<typeof decodeSessions>
-      const seen = new Set<string>()
-      let after: string | undefined
-      do {
-        const page = await getNativeSessionPage(signal, { after })
-        sessions.push(...page.sessions)
-        after = page.nextCursor
-        if (after && seen.has(after)) throw new Error('Conversation pagination repeated a cursor.')
-        if (after) seen.add(after)
-      } while (after)
-      return sessions
-    },
     getNativeSession: (id: string, signal?: AbortSignal) => request('GET', sessionPath(id), decodeSession, { signal }),
+    getNativeCurrent: (session: AgentSession, signal?: AbortSignal) => request('GET', `${sessionPath(session.id)}/current`, value => decodeCurrentSeed(value,session), { signal, maxResponseBytes:4 * 1024 * 1024 }),
+    getNativeHistory: (session: AgentSession, historyOptions: AgentHistoryOptions = {}, signal?: AbortSignal) => {
+      const query = new URLSearchParams()
+      if (historyOptions.before !== undefined) query.set('before', String(historyOptions.before))
+      if (historyOptions.limit !== undefined) query.set('limit', String(historyOptions.limit))
+      return request('GET', `${sessionPath(session.id)}/history${query.size ? `?${query}` : ''}`, value => {
+        const page = record(value)
+        if (!Number.isSafeInteger(page.lastSeq) || (page.lastSeq as number) < 0 || !Array.isArray(page.events) || page.events.length > 32) throw new Error('Invalid history page.')
+        const events = page.events.map(raw => decodeEvent(raw,session.id,session.provider))
+        if (events.some((event,index) => event.seq > (page.lastSeq as number) || index > 0 && event.seq !== events[index-1]!.seq + 1)) throw new Error('History event order is invalid.')
+        const nextBefore = page.nextBefore
+        if (nextBefore !== undefined && (!Number.isSafeInteger(nextBefore) || nextBefore !== events[0]?.seq || (nextBefore as number) < 2)) throw new Error('Invalid history cursor.')
+        return {events,lastSeq:page.lastSeq as number,nextBefore:nextBefore as number | undefined}
+      }, { signal, maxResponseBytes:4 * 1024 * 1024 })
+    },
     getNativeInputs: (id: string, signal?: AbortSignal) => request('GET', `${sessionPath(id)}/inputs`, decodeInputs, { signal }),
     /** Asks the host's decision evaluator to look at the pending requests again; it answers nothing itself. */
     evaluateNativeInputs: (id: string) => request('POST', `${sessionPath(id)}/evaluate-inputs`, record),

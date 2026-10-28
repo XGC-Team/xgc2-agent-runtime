@@ -1,3 +1,5 @@
+import { fingerprintBytes } from './fingerprint.js'
+
 export const AGENT_RUNTIME_SCHEMA = 'xgc.agent-runtime/v1' as const
 export const PROVIDERS = ['codex', 'claude', 'cursor', 'opencode', 'grok'] as const
 export type AgentProvider = typeof PROVIDERS[number]
@@ -59,7 +61,8 @@ export type StreamState = {
   providerSessionId: string; items: AgentItem[]; pending: Record<string, AgentRequest & { submitted: boolean }>
   decisions: Record<string, AgentDecisionRecord>
   runtimeId: string; metadata?: AgentConversationMetadata
-  notices: string[]; lastTurnStatus: string; recent: Record<number, string>
+  notices: string[]; lastTurnStatus: string; recent: Record<number, Uint8Array>
+  historyBefore?: number
   turnFailures?: Record<string, { message: string; createdAt?: string }>
 }
 
@@ -305,17 +308,79 @@ export function decodeEvent(value: unknown, sessionId: string, expectedProvider:
 export function emptyStream(sessionId: string, source: AgentProvider): StreamState {
   return { sessionId, provider: source, cursor: 0, worker: 'starting', activeTurnId: '', providerSessionId: '', runtimeId: '', items: [], pending: {}, decisions: {}, notices: [], lastTurnStatus: '', recent: {} }
 }
+
+// The current seed is a projection, not a journal replay. Its item snapshots
+// are validated through the same decoder, then installed at the exact cursor
+// supplied by the owning session.
+export function decodeCurrentSeed(value: unknown, expected: AgentSession): StreamState {
+  const seed = record(value), session = decodeSession(seed.session)
+  if (session.id !== expected.id || session.provider !== expected.provider || session.scope.profileId !== expected.scope.profileId || session.scope.accessConfirmed !== expected.scope.accessConfirmed || session.scope.context.kind !== expected.scope.context.kind || session.scope.context.id !== expected.scope.context.id || session.scope.workspace.id !== expected.scope.workspace.id || session.scope.workspace.revision !== expected.scope.workspace.revision || (expected.providerSessionId && session.providerSessionId && expected.providerSessionId !== session.providerSessionId)) throw new Error('The current conversation identity does not match.')
+  const activeTurnId = seed.activeTurnId === undefined ? '' : safeId(seed.activeTurnId)
+  const items = list(seed.items, raw => decodeEvent(raw,session.id,session.provider), 256)
+  const inputs = list(seed.inputs, raw => {
+    const input = record(raw)
+    return { request: decodeNativeRequest(input.request),submitted:boolean(input.submitted),decision:input.decision === undefined ? undefined : nativeDecision(input.decision) }
+  },16)
+  if (inputs.length && !activeTurnId) throw new Error('Pending requests have no current turn.')
+  let state = emptyStream(session.id,session.provider), seq = 0
+  const keys = new Set<string>()
+  let turn = activeTurnId
+  for (const item of items) {
+    const key = JSON.stringify([item.turnId,item.itemId])
+    if (!turn) turn = item.turnId ?? ''
+    if (item.kind !== 'item.snapshot' || item.seq > session.lastSeq || item.turnId !== turn || keys.has(key)) throw new Error('Invalid current item identity.')
+    keys.add(key)
+    state = reduceEvent(state,{...item,seq:++seq,runtimeId:undefined})
+  }
+  if (seed.result !== undefined) {
+    const result = decodeEvent(seed.result,session.id,session.provider)
+    if (result.kind !== 'turn.end' || result.seq > session.lastSeq || activeTurnId || (turn && result.turnId !== turn)) throw new Error('Invalid current turn result.')
+    state = reduceEvent(state,{...result,seq:++seq,runtimeId:undefined})
+  }
+  const ids = new Set<string>()
+  for (const input of inputs) {
+    if (ids.has(input.request.id) || (!input.submitted && input.decision)) throw new Error('Invalid current input identity.')
+    ids.add(input.request.id)
+    const base = {schemaVersion:AGENT_RUNTIME_SCHEMA,sessionId:session.id,provider:session.provider,turnId:activeTurnId,itemId:input.request.id}
+    state = reduceEvent(state,{...base,seq:++seq,kind:'input.request',request:input.request})
+    if (input.submitted) state = reduceEvent(state,{...base,seq:++seq,kind:'input.submitted',status:'submitted',...(input.decision ? {decision:input.decision} : {})})
+  }
+  const historyBefore = seed.historyBefore === undefined ? undefined : integer(seed.historyBefore)
+  if (historyBefore !== undefined && (historyBefore === 0 || historyBefore > session.lastSeq + 1)) throw new Error('Invalid history boundary.')
+  return {...state,cursor:session.lastSeq,recent:{},worker:session.state,activeTurnId,providerSessionId:session.providerSessionId ?? '',runtimeId:session.runtimeId ?? '',options:session.options,metadata:{title:session.title,archived:session.archived,metadataRevision:session.metadataRevision},
+    ...(seed.queue === undefined ? {} : {queue:decodePromptQueue(seed.queue)}),...(historyBefore === undefined ? {} : {historyBefore})}
+}
 const ITEM_LIMIT = 262144
+const RECENT_FINGERPRINTS = 64
+const fingerprintEncoder = new TextEncoder()
+// A sliced JS string may retain the entire multi-megabyte event backing store.
+// Copy only a clipped prefix; JSON preserves even isolated UTF-16 surrogates.
+function copyClippedText(content: string): string {
+  return JSON.parse(JSON.stringify(content.slice(0, ITEM_LIMIT))) as string
+}
+function eventFingerprint(event: AgentEvent): Uint8Array {
+  return fingerprintBytes(fingerprintEncoder.encode(JSON.stringify(event)))
+}
+
 export function applyEvent(state: StreamState, raw: unknown): StreamState {
   const e = decodeEvent(raw, state.sessionId, state.provider)
-  const fingerprint = JSON.stringify(e)
   if (e.seq <= state.cursor) {
-    if (state.recent[e.seq] && state.recent[e.seq] !== fingerprint) throw new Error('The same event sequence number appeared with different content.')
+    const previous = state.recent[e.seq]
+    if (!previous) throw new Error('The replayed event is outside the verification window; reload the conversation.')
+    const fingerprint = eventFingerprint(e)
+    if (previous.length !== fingerprint.length || !fingerprint.every((byte,index) => byte === previous[index])) throw new Error('The same event sequence number appeared with different content.')
     return state
   }
   if (e.seq !== state.cursor + 1) throw new Error('The event stream has a gap; reload the conversation and do not resubmit the task.')
-  const recent = { ...state.recent, [e.seq]: fingerprint }; delete recent[e.seq - 64]
-  const next = { ...state, cursor: e.seq, recent }
+  const next = reduceEvent(state,e)
+  const recent = { ...state.recent, [e.seq]: eventFingerprint(e) }; delete recent[e.seq - RECENT_FINGERPRINTS]
+  return { ...next, recent }
+}
+
+// Only decoded, identity-checked events enter this reducer. The current seed
+// uses it directly because its synthetic sequences are not replayable events.
+function reduceEvent(state: StreamState, e: AgentEvent): StreamState {
+  const next = { ...state, cursor: e.seq }
   if (e.runtimeId) {
     if (state.runtimeId && e.kind !== 'session.runtime' && e.runtimeId !== state.runtimeId) throw new Error('The runtime identity changed without a new runtime event.')
     next.runtimeId = e.runtimeId
@@ -352,8 +417,10 @@ export function applyEvent(state: StreamState, raw: unknown): StreamState {
       if (existing && existing.role !== e.role) throw new Error('The role of an item changed.')
       for (const key of ['providerThreadId', 'providerTurnId'] as const) { if (existing?.[key] && e[key] && existing[key] !== e[key]) throw new Error('The identity of an item changed.') }
       if (existing?.details && e.details && existing.details.type !== e.details.type) throw new Error('The structured type of an item changed.')
-      const content = e.kind === 'item.delta' ? (existing?.text ?? '') + (e.text ?? '') : e.kind === 'item.snapshot' ? e.text ?? '' : existing?.text ?? ''
-      const item: AgentItem = { key, turnId: e.turnId!, id: e.itemId!, role: e.role!, text: content.slice(0, ITEM_LIMIT), title: e.title || existing?.title || '', status: e.status || existing?.status || 'running', truncated: content.length > ITEM_LIMIT || (e.kind !== 'item.snapshot' && Boolean(existing?.truncated)),
+      const fullDelta = e.kind === 'item.delta' && existing?.text.length === ITEM_LIMIT
+      const content = e.kind === 'item.delta' ? fullDelta ? existing.text : (existing?.text ?? '') + (e.text ?? '') : e.kind === 'item.snapshot' ? e.text ?? '' : existing?.text ?? ''
+      const clipped = content.length > ITEM_LIMIT || (fullDelta && Boolean(e.text))
+      const item: AgentItem = { key, turnId: e.turnId!, id: e.itemId!, role: e.role!, text: content.length > ITEM_LIMIT ? copyClippedText(content) : content, title: e.title || existing?.title || '', status: e.status || existing?.status || 'running', truncated: clipped || (e.kind !== 'item.snapshot' && Boolean(existing?.truncated)),
         ...(existing?.turnStatus ? { turnStatus: existing.turnStatus } : {}),
         ...((e.sourceMethod ?? existing?.sourceMethod) ? { sourceMethod: e.sourceMethod ?? existing?.sourceMethod } : {}),
         ...((existing?.createdAt ?? e.createdAt) ? { createdAt: existing?.createdAt ?? e.createdAt } : {}),

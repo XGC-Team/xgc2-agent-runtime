@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentConversation, AgentInput, mergeTimelineItems } from '../src/AgentConversation.js'
 import { emptyStream } from '../src/state.js'
@@ -79,6 +79,52 @@ describe('shared native conversation host capabilities', () => {
     render(<AgentInput sessionId="outside" submitted={false} locale="zh" request={{id:'review',kind:'permission',title:'',options:[{id:'decline',label:'Decline',kind:'reject_once'}],questions:[]}} onAnswer={async () => undefined} />)
     expect(screen.getByRole('group', {name:'Agent 请求'})).toBeTruthy()
     expect(screen.getByRole('button', {name:'Decline'})).toBeTruthy()
+  })
+  it('pauses the retained sending spinner with host activity while keeping the pending receipt independent', async () => {
+    let accepted!: () => void
+    const send = vi.fn(() => new Promise<void>(resolve => { accepted = resolve }))
+    const answer = vi.fn(async () => undefined)
+    const props = { state: { ...emptyStream('sending', 'codex'), worker: 'ready' as const }, draft: 'Review this state', sendDisabled: false, onSend: send, onAnswer: answer }
+    const view = render(<AgentConversation {...props} active />)
+    const root = view.container.querySelector<HTMLElement>('[data-xgc-role="agent-conversation"]')!
+    const editor = screen.getByRole('textbox')
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }))
+    const spinner = root.querySelector('.visible-animate-spin')!
+    expect(spinner).toBeTruthy()
+    expect(spinner.classList.contains('motion-reduce:animate-none')).toBe(true)
+    expect(root.style.getPropertyValue('--visible-animation-state')).toBe('running')
+    view.rerender(<AgentConversation {...props} active={false} />)
+    expect(root.style.getPropertyValue('--visible-animation-state')).toBe('paused')
+    expect(root.querySelector('.visible-animate-spin')).toBe(spinner)
+    expect(screen.getByRole('textbox')).toBe(editor)
+    expect(send).toHaveBeenCalledOnce()
+    expect(answer).not.toHaveBeenCalled()
+    await act(async () => accepted())
+    expect(root.querySelector('.visible-animate-spin')).toBeNull()
+    expect(root.style.getPropertyValue('--visible-animation-state')).toBe('paused')
+    view.rerender(<AgentConversation {...props} active />)
+    expect(root.style.getPropertyValue('--visible-animation-state')).toBe('running')
+    expect(screen.getByRole('textbox')).toBe(editor)
+    expect(send).toHaveBeenCalledOnce()
+    expect(answer).not.toHaveBeenCalled()
+  })
+  it('parks standalone pending-request motion without answering or rebuilding the request', () => {
+    const answer = vi.fn(async () => undefined)
+    const props = { sessionId: 'pending-motion', submitted: false, request: { id: 'review', kind: 'permission' as const, title: '', options: [{ id: 'once', label: 'Allow once', kind: 'allow_once' as const }], questions: [] }, onAnswer: answer }
+    const view = render(<AgentInput {...props} active />)
+    const root = view.container.querySelector<HTMLElement>('[data-xgc-role="agent-pending-requests"]')!
+    const allow = screen.getByRole('button', { name: 'Allow once' }) as HTMLButtonElement
+    expect(root.style.getPropertyValue('--visible-animation-state')).toBe('running')
+    view.rerender(<AgentInput {...props} active={false} />)
+    expect(root.style.getPropertyValue('--visible-animation-state')).toBe('paused')
+    expect(screen.getByRole('button', { name: 'Allow once' })).toBe(allow)
+    expect(allow.disabled).toBe(true)
+    view.rerender(<AgentInput {...props} active />)
+    expect(root.style.getPropertyValue('--visible-animation-state')).toBe('running')
+    expect(allow.disabled).toBe(false)
+    expect(answer).not.toHaveBeenCalled()
+    fireEvent.click(allow)
+    expect(answer).toHaveBeenCalledOnce()
   })
   it('merges dated domain cards without reordering unknown-time native history', () => {
     const native: TimelineItem[] = [

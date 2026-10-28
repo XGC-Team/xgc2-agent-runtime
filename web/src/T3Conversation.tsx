@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { T3IdentityScope, useT3Identity } from './upstream/t3/identity.js';
 import { ComposerSurface } from './upstream/t3/ComposerSurface.js';
 import { ComposerBanner } from './upstream/t3/ComposerBanner.js';
@@ -174,7 +174,7 @@ function PendingRequestsContent({ model, active, disabled = false, locale = 'en'
 /** Same upstream request surface in conversation and global pending-request entry. */
 export function T3PendingRequests(props: T3PendingRequestsProps) {
   const [portal, setPortal] = useState<HTMLDivElement | null>(null);
-  return <div className="xgc-agent-chat" ref={setPortal} data-xgc-role="agent-pending-requests" data-xgc-id={props.model.sessionKey}>
+  return <div className="xgc-agent-chat" ref={setPortal} style={{ '--visible-animation-state': props.active ? 'running' : 'paused' } as CSSProperties} data-xgc-role="agent-pending-requests" data-xgc-id={props.model.sessionKey}>
     <T3IdentityScope value={props.model.sessionKey}><T3PortalContainer value={portal}><TooltipProvider><PendingRequestsContent key={props.model.sessionKey} {...props} /></TooltipProvider></T3PortalContainer></T3IdentityScope>
   </div>;
 }
@@ -241,7 +241,7 @@ function ConversationContent({ model, queueEnabled = false, active, disabled = f
 
 export function T3Conversation(props: T3ConversationProps) {
   const [portal, setPortal] = useState<HTMLDivElement | null>(null);
-  return <div className="xgc-agent-chat relative min-h-0" data-xgc-role="agent-conversation" data-xgc-id={props.model.sessionKey}>
+  return <div className="xgc-agent-chat relative min-h-0" style={{ '--visible-animation-state': props.active ? 'running' : 'paused' } as CSSProperties} data-xgc-role="agent-conversation" data-xgc-id={props.model.sessionKey}>
     <T3IdentityScope value={props.model.sessionKey}><T3PortalContainer value={portal}><TooltipProvider><ConversationContent key={props.model.sessionKey} {...props} /></TooltipProvider></T3PortalContainer></T3IdentityScope>
     <div ref={setPortal} className="pointer-events-none absolute inset-0 z-[130] overflow-visible [&>*]:pointer-events-auto" />
   </div>;

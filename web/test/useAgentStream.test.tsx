@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { useAgentStream, AGENT_STREAM_STATUS } from '../src/useAgentStream.js'
 import { AGENT_RUNTIME_SCHEMA, type AgentSession } from '../src/state.js'
+import * as streamState from '../src/state.js'
 
 const session = { schemaVersion: AGENT_RUNTIME_SCHEMA, id: 's_test', provider: 'codex', state: 'ready', createdAt: '2026-09-06T00:00:00Z', lastSeq: 0, title: 'Review', archived: false, metadataRevision: 1,
   scope: { profileId: 'codex', context: { kind: 'fixture', id: 'e1' }, workspace: { id: 'debug', revision: 'v1' }, accessConfirmed: true } } as AgentSession
@@ -35,6 +36,22 @@ function server(plan: Connection[]) {
 }
 
 const options = (fetch: typeof globalThis.fetch) => ({ basePath: 'https://core.test/api/agent-runtime', fetch, headers: { Authorization: 'Bearer host' } })
+
+function controlledFrames() {
+  const pending = new Map<number, FrameRequestCallback>()
+  let nextId = 0, maximumPending = 0
+  const request = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation(callback => {
+    pending.set(++nextId, callback)
+    maximumPending = Math.max(maximumPending, pending.size)
+    return nextId
+  })
+  const cancel = vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation(id => { pending.delete(id) })
+  return { pending, request, cancel, maximumPending: () => maximumPending, flush: () => {
+    const callbacks = [...pending.values()]
+    pending.clear()
+    callbacks.forEach(callback => callback(0))
+  } }
+}
 
 describe('useAgentStream over the XRPC event stream', () => {
   it('applies the journal, sends the host headers and reports the connection', async () => {
@@ -89,5 +106,42 @@ describe('useAgentStream over the XRPC event stream', () => {
     expect(result.current.error).toContain('permission_denied')
     expect(requests).toHaveLength(1)
     unmount()
+  })
+
+  it('bounds a 769-event journal burst to three full 256-item commits and one pending presentation frame', async () => {
+    const frames = controlledFrames()
+    const apply = vi.spyOn(streamState, 'applyEvent')
+    const { fetch, requests } = server([{ frames: Array.from({ length: 769 }, (_, index) => frame(delta(index + 1, 'a'))), hold: true }])
+    const { result, unmount } = renderHook(() => useAgentStream(session, 0, options(fetch)))
+    await waitFor(() => expect(frames.request).toHaveBeenCalledTimes(4))
+    expect(apply).toHaveBeenCalledTimes(768)
+    expect(result.current.state.cursor).toBe(768)
+    expect(frames.maximumPending()).toBe(1)
+    expect(frames.pending.size).toBe(1)
+    expect(frames.cancel).toHaveBeenCalledTimes(3)
+    expect(requests).toHaveLength(1)
+    act(frames.flush)
+    expect(apply).toHaveBeenCalledTimes(769)
+    expect(result.current.state.cursor).toBe(769)
+    expect(result.current.state.items[0]?.text).toBe('a'.repeat(769))
+    expect(frames.pending.size).toBe(0)
+    unmount()
+    expect(requests[0]!.signal.aborted).toBe(true)
+  })
+
+  it('cancels a pending presentation and rejects its late callback after the stream owner unmounts', async () => {
+    const frames = controlledFrames()
+    const apply = vi.spyOn(streamState, 'applyEvent')
+    const { fetch, requests } = server([{ frames: [frame(delta(1, 'pending'))], hold: true }])
+    const { result, unmount } = renderHook(() => useAgentStream(session, 0, options(fetch)))
+    await waitFor(() => expect(frames.pending.size).toBe(1))
+    const late = [...frames.pending.values()][0]!
+    expect(result.current.state.cursor).toBe(0)
+    unmount()
+    expect(requests[0]!.signal.aborted).toBe(true)
+    expect(frames.cancel).toHaveBeenCalledOnce()
+    expect(frames.pending.size).toBe(0)
+    act(() => late(0))
+    expect(apply).not.toHaveBeenCalled()
   })
 })

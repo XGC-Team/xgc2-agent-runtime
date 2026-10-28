@@ -7,7 +7,7 @@ function Spinner({ className, ...props }: React.ComponentProps<typeof Loader2Ico
   return (
     <Loader2Icon
       aria-label="Loading"
-      className={cn("animate-spin", className)}
+      className={cn("visible-animate-spin motion-reduce:animate-none", className)}
       role="status"
       {...props}
     />
